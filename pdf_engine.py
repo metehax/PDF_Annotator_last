@@ -200,17 +200,19 @@ class PageRenderTask(QRunnable):
     oluşturulmalıdır, aksi halde Qt platformuna göre kararsız davranabilir.
     """
 
-    def __init__(self, pdf: "PDFDocument", index: int, invert: bool = False):
+    def __init__(self, pdf: "PDFDocument", index: int, invert: bool = False,
+                 scale: float = RENDER_SCALE):
         super().__init__()
         self.pdf = pdf
         self.index = index
         self.invert = invert
+        self.scale = scale
         self.signals = RenderSignals()
         self.setAutoDelete(True)
 
     def run(self):
         try:
-            img = self.pdf.render_qimage_sync(self.index, self.invert)
+            img = self.pdf.render_qimage_sync(self.index, self.invert, self.scale)
             self.signals.finished.emit(self.index, img)
         except Exception as ex:  # pragma: no cover - savunmacı
             self.signals.failed.emit(self.index, str(ex))
@@ -300,6 +302,10 @@ class PDFDocument:
         self._lines_cache: Dict[int, list] = {}
         # Metin düzenleme aracı: (sayfa, force_ocr) -> ocr.extract_items sonucu
         self.edit_cache: Dict[Tuple[int, bool], Dict] = {}
+        # Görünümün neyi yeniden çizmesi gerektiğini anlaması için sayaçlar:
+        # layout_rev -> sayfa sayısı/boyutu değişti, _page_rev -> sayfa içeriği
+        self.layout_rev = 0
+        self._page_rev: Dict[int, int] = {}
         self._closed = False
 
     @property
@@ -310,6 +316,9 @@ class PDFDocument:
         with self.lock:
             r = self.doc[index].rect
             return r.width, r.height
+
+    def page_rev(self, index: int) -> int:
+        return self._page_rev.get(index, 0)
 
     def page_rotation(self, index: int) -> int:
         with self.lock:
@@ -324,6 +333,8 @@ class PDFDocument:
         self._thumb_cache.clear()
         self._lines_cache.clear()
         self.edit_cache.clear()
+        self.layout_rev += 1
+        self._page_rev.clear()
 
     def _invalidate_page(self, index: int):
         """Yalnızca tek bir sayfayı geçersiz kılar (ör. döndürme)."""
@@ -332,15 +343,17 @@ class PDFDocument:
         self._lines_cache.pop(index, None)
         for k in [k for k in self.edit_cache if k[0] == index]:
             self.edit_cache.pop(k, None)
+        self._page_rev[index] = self._page_rev.get(index, 0) + 1
 
     # -- render ---------------------------------------------------------
-    def render_qimage_sync(self, index: int, invert: bool = False) -> QImage:
+    def render_qimage_sync(self, index: int, invert: bool = False,
+                           scale: float = RENDER_SCALE) -> QImage:
         """Senkron, saf render — herhangi bir iş parçacığından çağrılabilir
         (kilit ile korunur). UI'de doğrudan kullanmak yerine PageRenderTask
         üzerinden arka planda çağırın."""
         with self.lock:
             page = self.doc[index]
-            pix = page.get_pixmap(matrix=fitz.Matrix(RENDER_SCALE, RENDER_SCALE), alpha=False)
+            pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             if invert:
                 pix.invert_irect()
             img = QImage(pix.samples, pix.width, pix.height, pix.stride,
@@ -365,12 +378,13 @@ class PDFDocument:
         self.cache_pixmap(index, pm)
         return pm
 
-    def make_render_task(self, index: int, invert: bool = False) -> PageRenderTask:
+    def make_render_task(self, index: int, invert: bool = False,
+                         scale: float = RENDER_SCALE) -> PageRenderTask:
         """Bir arka plan render görevi oluşturur (henüz başlatılmaz).
         Çağıran taraf, race durumunu önlemek için sinyalleri bağladıktan
         SONRA `QThreadPool.globalInstance().start(task)` ile başlatmalıdır.
         """
-        return PageRenderTask(self, index, invert)
+        return PageRenderTask(self, index, invert, scale)
 
     def thumbnail(self, index: int, scale: float = 0.2) -> QPixmap:
         cached = self._thumb_cache.get(index)
@@ -460,12 +474,14 @@ class PDFDocument:
             page = self.doc[index]
             page.set_rotation((page.rotation + delta_degrees) % 360)
         self._invalidate_page(index)
+        self.layout_rev += 1
 
     def set_absolute_rotation(self, index: int, degrees: int):
         """JSON proje dosyasından döndürme durumunu geri yüklerken kullanılır."""
         with self.lock:
             self.doc[index].set_rotation(int(degrees) % 360)
         self._invalidate_page(index)
+        self.layout_rev += 1
 
     # -- kaynak temizliği ----------------------------------------------------
     def close(self):

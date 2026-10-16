@@ -69,7 +69,8 @@ class _GizmoHandle(QGraphicsRectItem):
     def mouseMoveEvent(self, event: QGraphicsSceneMouseEvent):
         if self._dragging:
             shift = bool(event.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self.overlay.update_resize(self.role, event.scenePos(), shift)
+            # Gizmo bir sayfa öğesinin çocuğu olabilir: sahne -> sayfa koordinatı
+            self.overlay.update_resize(self.role, self.overlay.mapFromScene(event.scenePos()), shift)
         event.accept()
 
     def mouseReleaseEvent(self, event: QGraphicsSceneMouseEvent):

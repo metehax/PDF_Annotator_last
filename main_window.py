@@ -18,9 +18,11 @@ from typing import Dict, List, Optional, Tuple
 
 import pymupdf as fitz
 
-from PySide6.QtCore import QObject, QPointF, QRectF, QRunnable, QSize, Qt, QThreadPool, QUrl, Signal
+from PySide6.QtCore import (
+    QObject, QPoint, QPointF, QRectF, QRunnable, QSize, Qt, QThreadPool, QTimer, QUrl, Signal,
+)
 from PySide6.QtGui import (
-    QAction, QColor, QDesktopServices, QFont, QIcon, QImage, QKeySequence, QPixmap,
+    QAction, QColor, QDesktopServices, QFont, QIcon, QImage, QKeySequence, QPalette, QPixmap,
     QUndoGroup,
 )
 from PySide6.QtWidgets import (
@@ -694,9 +696,8 @@ class MainWindow(QMainWindow):
         self._refresh_current_page()
 
     def _refresh_current_page(self):
-        s = self.active_session
-        if s:
-            self.view.render_page(s, s.current_page, invert=self.night_mode)
+        if self.active_session:
+            self.view.refresh_current_page()
 
     def _font_row(self):
         row = QWidget()
@@ -862,6 +863,8 @@ class MainWindow(QMainWindow):
         self.view.itemsMoved.connect(self.sync_moved_items)
         self.view.resizeRequested.connect(self.on_resize_requested)
         self.view.contextMenuRequested.connect(self.show_item_context_menu)
+        self.view.currentPageChanged.connect(self._on_view_page_changed)
+        self.view.zoomChanged.connect(self._sync_zoom_slider)
         normal_frame = self._framed(self.view, "SAYFA")
 
         self.pane_left = ComparePane(lambda: self.sessions, lambda: self.state,
@@ -926,7 +929,7 @@ class MainWindow(QMainWindow):
         h.addWidget(self.btn_fit_width); h.addWidget(self.btn_fit_page)
 
         self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setRange(10, 400)
+        self.zoom_slider.setRange(10, 800)
         self.zoom_slider.setValue(100)
         self.zoom_slider.setFixedWidth(160)
         self.zoom_slider.valueChanged.connect(self._on_zoom_slider_changed)
@@ -954,6 +957,12 @@ class MainWindow(QMainWindow):
         self.thumb_list.setIconSize(QSize(120, 156))
         self.thumb_list.setSpacing(8)
         self.thumb_list.currentRowChanged.connect(self._on_thumb_selected)
+        self._thumb_gen = 0
+        self._thumb_tasks: list = []
+        self._thumb_timer = QTimer(self)
+        self._thumb_timer.setSingleShot(True)
+        self._thumb_timer.timeout.connect(self._load_visible_thumbs)
+        self.thumb_list.verticalScrollBar().valueChanged.connect(lambda _v: self._thumb_timer.start(60))
         self.thumb_list.setObjectName("thumbs")
         self.thumb_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.thumb_list.customContextMenuRequested.connect(self._on_thumb_context_menu)
@@ -1210,8 +1219,7 @@ class MainWindow(QMainWindow):
 
     def _stylesheet(self, t):
         return f"""
-            QMainWindow, QWidget {{ background:{t['bg']}; color:{t['fg']};
-                font-family:'Segoe UI','Arial'; font-size:13px; }}
+            QMainWindow, QDialog {{ background:{t['bg']}; color:{t['fg']}; }}
             #toolbar, #bottombar {{ background:{t['toolbar']}; border-bottom:1px solid {t['border']}; }}
             #tbGroup {{ background:transparent; border-right:1px solid {t['border']}; }}
             #tbGroupTitle {{ color:{t['label']}; font-size:10px; font-weight:700; letter-spacing:1px; }}
@@ -1264,8 +1272,28 @@ class MainWindow(QMainWindow):
         """
 
     def _apply_style(self):
-        self.setStyleSheet(self._stylesheet(self._THEMES["dark" if self.dark_mode else "light"]))
-        self.view.setBackgroundBrush(QColor(self._THEMES["dark" if self.dark_mode else "light"]["view_bg"]))
+        t = self._THEMES["dark" if self.dark_mode else "light"]
+        # Temel renkler ve yazı tipi QPalette/QFont ile verilir; eskiden her
+        # QWidget'a uygulanan stil kuralı (arka plan) tüm bileşenleri — çizim
+        # alanı dahil — her boyamada stil motorundan geçirip yavaşlatıyordu.
+        app = QApplication.instance()
+        pal = QPalette()
+        for role, key in (
+            (QPalette.ColorRole.Window, "bg"), (QPalette.ColorRole.WindowText, "fg"),
+            (QPalette.ColorRole.Base, "frame_bg"), (QPalette.ColorRole.AlternateBase, "bg"),
+            (QPalette.ColorRole.Text, "fg"), (QPalette.ColorRole.Button, "btn"),
+            (QPalette.ColorRole.ButtonText, "fg"), (QPalette.ColorRole.ToolTipBase, "toolbar"),
+            (QPalette.ColorRole.ToolTipText, "fg"), (QPalette.ColorRole.Highlight, "accent"),
+            (QPalette.ColorRole.PlaceholderText, "hint"),
+        ):
+            pal.setColor(role, QColor(t[key]))
+        pal.setColor(QPalette.ColorRole.HighlightedText, QColor("#ffffff"))
+        app.setPalette(pal)
+        font = QFont("Segoe UI")
+        font.setPixelSize(13)
+        app.setFont(font)
+        self.setStyleSheet(self._stylesheet(t))
+        self.view.setBackgroundBrush(QColor(t["view_bg"]))
 
     def toggle_theme(self):
         self.dark_mode = not self.dark_mode
@@ -1274,7 +1302,7 @@ class MainWindow(QMainWindow):
 
     def toggle_night_mode(self, checked: bool):
         self.night_mode = checked
-        self.view.refresh_current_page()
+        self.view.set_invert(checked)
         self.pane_left._render()
         self.pane_right._render()
 
@@ -1799,17 +1827,63 @@ class MainWindow(QMainWindow):
     # =====================================================================
     # Küçük resimler / İçindekiler / sayfa gösterimi / yakınlaştırma
     # =====================================================================
+    _THUMB_LOADED = Qt.ItemDataRole.UserRole + 1
+
     def _build_thumbnails(self):
+        """Küçük resim listesini anında kurar (boş kâğıt simgeleriyle);
+        gerçek görüntüler göründükçe arka planda üretilir."""
         s = self.active_session
+        self._thumb_gen += 1
         self.thumb_list.blockSignals(True)
         self.thumb_list.clear()
         if s:
+            size = self.thumb_list.iconSize()
+            blank = QPixmap(int(size.width() * 0.76), size.height())
+            blank.fill(QColor("#ffffff"))
+            icon = QIcon(blank)
             for i in range(s.pdf.page_count):
-                pix = s.pdf.thumbnail(i)
-                item = QListWidgetItem(QIcon(pix), f"{i + 1}")
+                item = QListWidgetItem(icon, f"{i + 1}")
                 item.setTextAlignment(Qt.AlignmentFlag.AlignCenter)
                 self.thumb_list.addItem(item)
+            self.thumb_list.setCurrentRow(s.current_page)
         self.thumb_list.blockSignals(False)
+        self._thumb_timer.start(0)
+
+    def _load_visible_thumbs(self):
+        s = self.active_session
+        lw = self.thumb_list
+        if not s or lw.count() == 0:
+            return
+        vr = lw.viewport().rect()
+        first = lw.indexAt(vr.topLeft() + QPoint(8, 8)).row()
+        last = lw.indexAt(vr.bottomLeft() + QPoint(8, -8)).row()
+        first = max(0, first)
+        last = min(lw.count() - 1, (last if last >= 0 else first + 8) + 4)
+        gen = self._thumb_gen
+        for i in range(first, last + 1):
+            item = lw.item(i)
+            if item is None or item.data(self._THUMB_LOADED):
+                continue
+            item.setData(self._THUMB_LOADED, True)
+            task = s.pdf.make_render_task(i, False, 0.25)
+            self._thumb_tasks.append(task)
+
+            def on_done(idx, qimg, _task=task, _gen=gen, _s=s):
+                if _task in self._thumb_tasks:
+                    self._thumb_tasks.remove(_task)
+                if _gen != self._thumb_gen or _s is not self.active_session:
+                    return
+                it = self.thumb_list.item(idx)
+                if it is not None:
+                    it.setIcon(QIcon(QPixmap.fromImage(qimg)))
+
+            def on_fail(_idx, _msg, _task=task):
+                if _task in self._thumb_tasks:
+                    self._thumb_tasks.remove(_task)
+
+            task.signals.finished.connect(on_done)
+            task.signals.failed.connect(on_fail)
+            self.threadpool.start(task)
 
     def _build_toc(self):
         self.toc_tree.clear()
@@ -1850,55 +1924,53 @@ class MainWindow(QMainWindow):
             return
         index = max(0, min(index, s.pdf.page_count - 1))
         s.current_page = index
-        self.view.render_page(s, index, invert=self.night_mode)
+        self.view.show_page(s, index, invert=self.night_mode)
+        self._after_page_change(index)
+
+    def _on_view_page_changed(self, index):
+        """Kullanıcı kaydırınca ya da başka bir sayfaya tıklayınca."""
+        s = self.active_session
+        if not s or not (0 <= index < s.pdf.page_count) or index == s.current_page:
+            return
+        s.current_page = index
+        self._after_page_change(index)
+
+    def _after_page_change(self, index):
+        s = self.active_session
         self.lbl_page.setText(f"{index + 1} / {s.pdf.page_count}")
         if self.thumb_list.currentRow() != index:
             self.thumb_list.blockSignals(True)
             self.thumb_list.setCurrentRow(index)
             self.thumb_list.blockSignals(False)
-        self._apply_zoom_percent(self.zoom_slider.value())
+            item = self.thumb_list.item(index)
+            if item is not None:
+                self.thumb_list.scrollToItem(item)
         self.refresh_layers_panel()
         self._update_search_highlight_for_page()
         if self.state.tool == "edit":
             self._scan_current_page_for_edit()
 
     def fit_width(self):
-        s = self.active_session
-        if not s:
-            return
-        w, _ = s.pdf.page_size(s.current_page)
-        vp = self.view.viewport().width() - 24
-        if w > 0:
-            self._zoom = vp / w
-            self._apply_zoom_transform()
-            self._sync_zoom_slider()
+        if self.active_session:
+            self.view.fit_width()
 
     def fit_page(self):
-        s = self.active_session
-        if not s:
-            return
-        self.view.fitInView(self.view.scene_obj.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)
-        self._zoom = self.view.transform().m11()
-        self._sync_zoom_slider()
+        if self.active_session:
+            self.view.fit_page()
 
-    def _sync_zoom_slider(self):
-        pct = max(10, min(400, int(round(self._zoom * 100))))
+    def _sync_zoom_slider(self, zoom=None):
+        self._zoom = self.view.zoom() if zoom is None else zoom
+        pct = int(round(self._zoom * 100))
         self.zoom_slider.blockSignals(True)
-        self.zoom_slider.setValue(pct)
+        self.zoom_slider.setValue(max(self.zoom_slider.minimum(), min(self.zoom_slider.maximum(), pct)))
         self.zoom_slider.blockSignals(False)
         self.lbl_zoom.setText(f"{pct}%")
-
-    def _apply_zoom_transform(self):
-        self.view.resetTransform()
-        self.view.scale(self._zoom, self._zoom)
 
     def _on_zoom_slider_changed(self, value):
         self._apply_zoom_percent(value)
 
     def _apply_zoom_percent(self, pct):
-        self._zoom = pct / 100.0
-        self._apply_zoom_transform()
-        self.lbl_zoom.setText(f"{pct}%")
+        self.view.set_zoom(pct / 100.0)
 
     # =====================================================================
     # Arama (Ctrl+F)
@@ -1952,17 +2024,19 @@ class MainWindow(QMainWindow):
         total = len(self._search_flat)
         self.lbl_search_status.setText(f"{total} eşleşme bulundu." if total else "Eşleşme bulunamadı.")
         self._search_pos = -1
+        self.view.set_all_search_highlights(result)
         if total:
             self.goto_next_search_hit()
-        else:
-            self.view.set_search_highlights([])
 
     def _on_search_result_clicked(self, item):
         page = item.data(Qt.ItemDataRole.UserRole)
         if page is not None:
-            self.goto_page(int(page))
-            hits = self._search_results.get(int(page), [])
-            self.view.set_search_highlights(hits, 0 if hits else None)
+            page = int(page)
+            if (page, 0) in self._search_flat:
+                self._search_pos = self._search_flat.index((page, 0))
+                self._show_search_hit()
+            else:
+                self.goto_page(page)
 
     def goto_next_search_hit(self):
         if not self._search_flat:
@@ -1978,22 +2052,22 @@ class MainWindow(QMainWindow):
 
     def _show_search_hit(self):
         page, local_idx = self._search_flat[self._search_pos]
-        if not self.active_session or self.active_session.current_page != page:
-            self.goto_page(page)
-        hits = self._search_results.get(page, [])
-        self.view.set_search_highlights(hits, local_idx)
+        self.view.set_all_search_highlights(self._search_results, (page, local_idx), center=True)
+        s = self.active_session
+        if s and s.current_page != page:
+            s.current_page = page
+            self._after_page_change(page)
         self.lbl_search_status.setText(f"{self._search_pos + 1} / {len(self._search_flat)}")
 
     def _update_search_highlight_for_page(self):
-        s = self.active_session
-        if not s or not self._search_results:
+        """Görünüm tüm sayfaların vurgularını kendisi tutar; belge yeniden
+        kurulduğunda (sekme değişimi vb.) güncel sonuçları yeniden verir."""
+        if not self.active_session:
             return
-        hits = self._search_results.get(s.current_page, [])
         active = None
         if self._search_flat and 0 <= self._search_pos < len(self._search_flat):
-            p, li = self._search_flat[self._search_pos]
-            active = li if p == s.current_page else None
-        self.view.set_search_highlights(hits, active)
+            active = self._search_flat[self._search_pos]
+        self.view.set_all_search_highlights(self._search_results or {}, active)
 
     # =====================================================================
     # Annotation ekle / sil / taşı / boyutlandır (QUndoStack üzerinden)
@@ -2004,9 +2078,10 @@ class MainWindow(QMainWindow):
         for pane in (self.pane_left, self.pane_right):
             if pane.session is session and pane.page == page:
                 pane._render()
-        if self.active_session is session and self.view._page_index == page:
-            self.view.render_page(session, page, invert=self.night_mode)
-            self.refresh_layers_panel()
+        if self.active_session is session:
+            self.view.refresh_page(page)
+            if page == session.current_page:
+                self.refresh_layers_panel()
         session.dirty = True
 
     def add_annotation(self, ann):
@@ -2419,7 +2494,8 @@ class MainWindow(QMainWindow):
         s = self.active_session
         if not s:
             return
-        cmd = ResizeAnnotationCommand(s, s.current_page, ann, old_rect, new_rect,
+        page = self.view.page_of_annotation(ann)
+        cmd = ResizeAnnotationCommand(s, s.current_page if page is None else page, ann, old_rect, new_rect,
                                       on_change=self._on_session_change)
         s.undo_stack.push(cmd)
 
@@ -2433,7 +2509,8 @@ class MainWindow(QMainWindow):
             pos = gitem.pos()
             if pos.x() != 0 or pos.y() != 0:
                 dx, dy = pos.x(), pos.y()
-                cmd = MoveAnnotationCommand(s, s.current_page, ann, dx, dy,
+                page = self.view.page_of_item(gitem)
+                cmd = MoveAnnotationCommand(s, s.current_page if page is None else page, ann, dx, dy,
                                             on_change=self._on_session_change)
                 s.undo_stack.push(cmd)
                 moved_any = True
@@ -2446,7 +2523,9 @@ class MainWindow(QMainWindow):
         ann = self.view.item_ann_map.get(gitem)
         if not s or ann is None:
             return
-        cmd = RemoveAnnotationCommand(s, s.current_page, ann, on_change=self._on_session_change)
+        page = self.view.page_of_item(gitem)
+        cmd = RemoveAnnotationCommand(s, s.current_page if page is None else page, ann,
+                                      on_change=self._on_session_change)
         s.undo_stack.push(cmd)
         self.status.setText("Öge silindi.")
 
@@ -2469,10 +2548,13 @@ class MainWindow(QMainWindow):
         ann = self.view.item_ann_map.get(gitem)
         if chosen == act_del:
             self._delete_item(gitem)
-        elif chosen == act_front and s and ann:
-            s.undo_stack.push(ZOrderCommand(s, s.current_page, ann, True, on_change=self._on_session_change))
+        page = self.view.page_of_item(gitem)
+        if page is None and s:
+            page = s.current_page
+        if chosen == act_front and s and ann:
+            s.undo_stack.push(ZOrderCommand(s, page, ann, True, on_change=self._on_session_change))
         elif chosen == act_back and s and ann:
-            s.undo_stack.push(ZOrderCommand(s, s.current_page, ann, False, on_change=self._on_session_change))
+            s.undo_stack.push(ZOrderCommand(s, page, ann, False, on_change=self._on_session_change))
 
     # =====================================================================
     # Katmanlar paneli

@@ -35,6 +35,11 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 
 ## Öne çıkan mimari kararlar
 
+* **Sürekli kaydırma** (`views.PDFView`): tüm sayfalar alt alta `PageItem`
+  olarak dizilir; işaretler ilgili sayfanın çocuk öğesidir (koordinatlar sayfa
+  birimi). Yalnızca görünen sayfalar + komşuları, o anki zoom'a uygun
+  çözünürlükte arka planda render edilir; uzaktakiler bellekten atılır.
+  Ctrl+tekerlek yumuşak zoom, Boşluk/orta tuş ile sürükleme, Home/End/PgUp/PgDn.
 * **LRU önbellek** (`pdf_engine.LRUCache`, `collections.OrderedDict` tabanlı)
   son 10 sayfanın render'ını tutar; daha eskisi otomatik atılır.
 * **Asenkron render**: `PDFDocument.make_render_task()` bir `QRunnable`

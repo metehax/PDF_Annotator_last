@@ -23,15 +23,19 @@ Sorumluluklar:
 
 from __future__ import annotations
 
+import bisect
 import math
 from typing import Callable, Dict, List, Optional
 
-from PySide6.QtCore import QPointF, QRectF, QThreadPool, Qt, Signal
-from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap
+from PySide6.QtCore import (
+    QAbstractAnimation, QEasingCurve, QEvent, QPoint, QPointF, QRectF, QSizeF,
+    QThreadPool, QTimer, QVariantAnimation, Qt, Signal,
+)
+from PySide6.QtGui import QBrush, QColor, QPainter, QPainterPath, QPen, QPixmap, QTransform
 from PySide6.QtWidgets import (
-    QComboBox, QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem,
-    QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
-    QPushButton, QVBoxLayout, QWidget,
+    QComboBox, QFrame, QGraphicsEllipseItem, QGraphicsItem, QGraphicsPathItem,
+    QGraphicsPixmapItem, QGraphicsRectItem, QGraphicsScene, QGraphicsView, QHBoxLayout,
+    QLabel, QPushButton, QVBoxLayout, QWidget,
 )
 
 from gizmo import SelectionGizmo
@@ -40,12 +44,72 @@ from models import (
     LineAnnotation, RedactionAnnotation, ShapeAnnotation,
     ToolState, arrow_wing_points, catmull_rom_to_beziers,
 )
-from pdf_engine import RENDER_SCALE
 
 
 # ---------------------------------------------------------------------------
-# Ana çizim yüzeyi
+# Ana çizim yüzeyi — sürekli kaydırmalı çok sayfalı görünüm
 # ---------------------------------------------------------------------------
+PAGE_GAP = 16.0                # sayfalar arası boşluk (pt)
+DOC_MARGIN = 24.0              # belge çevresindeki boşluk (pt)
+ZOOM_MIN, ZOOM_MAX = 0.1, 8.0
+MAX_RENDER_PIXELS = 40_000_000  # tek sayfa render'ı için piksel üst sınırı
+KEEP_NEIGHBOURS = 2            # görünür alanın dışında render'ı tutulan sayfa
+
+
+class PageItem(QGraphicsItem):
+    """Tek bir sayfanın "kâğıdı": gölge + zemin rengi + render edilmiş
+    görüntü. İşaretler, arama vurguları ve düzenleme kutuları bu öğenin
+    çocuklarıdır; böylece koordinatları doğrudan sayfa (PDF pt) birimidir."""
+
+    SHADOW = 5.0
+
+    def __init__(self, index: int, w: float, h: float):
+        super().__init__()
+        self.index = index
+        self.w, self.h = w, h
+        self.paper = QColor("#ffffff")
+        self.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.bg = QGraphicsPixmapItem(self)
+        self.bg.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
+        self.bg.setShapeMode(QGraphicsPixmapItem.ShapeMode.BoundingRectShape)
+        self.bg.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+        self.bg.setZValue(-1000)
+        self.render_key = None        # (sayfa_rev, invert, ölçek) — ekrandaki
+        self.pending_key = None       # yolda olan render isteği
+        self.ann_items: List[QGraphicsItem] = []
+        self.search_items: List[QGraphicsItem] = []
+        self.edit_items: List[QGraphicsItem] = []
+
+    def page_rect(self) -> QRectF:
+        return QRectF(0, 0, self.w, self.h)
+
+    def boundingRect(self) -> QRectF:
+        s = self.SHADOW
+        return QRectF(-s, -s, self.w + 2 * s, self.h + 2 * s)
+
+    def paint(self, painter, option, widget=None):
+        r = self.page_rect()
+        painter.setPen(Qt.PenStyle.NoPen)
+        # yumuşak gölge: birkaç saydam katman
+        for i, alpha in ((3.0, 10), (2.0, 16), (1.0, 26)):
+            painter.setBrush(QColor(0, 0, 0, alpha))
+            painter.drawRoundedRect(r.adjusted(-i, -i + 1.2, i, i + 1.2), 2 + i, 2 + i)
+        painter.setBrush(self.paper)
+        painter.drawRect(r)
+
+    def set_pixmap(self, pm: QPixmap, key) -> None:
+        self.bg.setPixmap(pm)
+        if pm.width():
+            self.bg.setScale(self.w / pm.width())
+        self.render_key = key
+
+    def drop_pixmap(self) -> None:
+        if self.render_key is not None:
+            self.bg.setPixmap(QPixmap())
+        self.render_key = None
+        self.pending_key = None
+
+
 class PDFView(QGraphicsView):
     annotationCreated = Signal(object)             # Annotation
     textRequested = Signal(QRectF)                  # metin kutusu istendi
@@ -57,31 +121,47 @@ class PDFView(QGraphicsView):
     resizeRequested = Signal(object, QRectF, QRectF)  # ann, eski_rect, yeni_rect
     contextMenuRequested = Signal(object, object)
     selectionAnnotationChanged = Signal(object)      # seçili Annotation | None
+    currentPageChanged = Signal(int)                 # kaydırma / tıklama ile
+    zoomChanged = Signal(float)
+
+    # Tüm konum sinyalleri (textRequested, numberRequested, …) SAYFA
+    # koordinatlarıyla yayılır; hangi sayfa olduğu `current_page`'dir ve
+    # sinyalden hemen önce currentPageChanged ile bildirilir.
 
     def __init__(self, state: ToolState, threadpool: Optional[QThreadPool] = None):
         super().__init__()
         self.state = state
         self.threadpool = threadpool or QThreadPool.globalInstance()
         self.scene_obj = QGraphicsScene(self)
+        self.scene_obj.setItemIndexMethod(QGraphicsScene.ItemIndexMethod.NoIndex)
         self.setScene(self.scene_obj)
         self.setRenderHints(QPainter.RenderHint.Antialiasing |
                             QPainter.RenderHint.SmoothPixmapTransform)
-        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.AnchorUnderMouse)
+        self.setOptimizationFlag(QGraphicsView.OptimizationFlag.DontAdjustForAntialiasing, True)
+        self.setViewportUpdateMode(QGraphicsView.ViewportUpdateMode.SmartViewportUpdate)
+        self.setTransformationAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.setResizeAnchor(QGraphicsView.ViewportAnchor.NoAnchor)
+        self.setFrameShape(QFrame.Shape.NoFrame)
         self.setBackgroundBrush(QColor("#2b2d31"))
         self.setDragMode(QGraphicsView.DragMode.NoDrag)
+        self.setFocusPolicy(Qt.FocusPolicy.StrongFocus)
         self.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.customContextMenuRequested.connect(self._on_context_menu)
 
         self.item_ann_map: Dict[QGraphicsItem, Annotation] = {}
         self.ann_item_map: Dict[int, QGraphicsItem] = {}
-        self.page_lines: list = []
+        self.item_page_map: Dict[QGraphicsItem, int] = {}
 
         self._session = None
-        self._page_index: Optional[int] = None
         self._invert = False
-        self._bg_item = None
+        self._pages: List[PageItem] = []
+        self._tops: List[float] = []
+        self._layout_sig = None
+        self._current = 0
+        self._programmatic_scroll = False
+        self._zoom = 1.0
         self._gizmo_target: Optional[Annotation] = None
-        self._search_items: List[QGraphicsRectItem] = []
+        self._search_state = ({}, None)
 
         self.gizmo = SelectionGizmo()
         self.scene_obj.addItem(self.gizmo)
@@ -90,59 +170,83 @@ class PDFView(QGraphicsView):
         self.scene_obj.selectionChanged.connect(self._on_selection_changed)
 
         self._panning = False
+        self._space_down = False
         self._pan_last = QPointF()
         self._drawing = False
+        self._active_page: Optional[PageItem] = None
         self._start = QPointF()
         self._temp_item = None
         self._ink_points: list = []
         self._hl_fixed_y = None
         self._line_end = QPointF()
 
-        # PySide6, QThreadPool'a verilen (setAutoDelete=True) bir QRunnable'ın
-        # PYTHON tarafındaki nesnesini de canlı tutmayı garanti etmez; hiçbir
-        # yerde referansı kalmazsa çöp toplayıcı sinyal nesnesini (QObject)
-        # görev hâlâ çalışırken silebilir. Bu yüzden bitene kadar burada
-        # güçlü bir referans tutuyoruz.
+        # Render'lar kaydırma/zoom durulunca istenir (her pikselde değil)
+        self._render_timer = QTimer(self)
+        self._render_timer.setSingleShot(True)
+        self._render_timer.timeout.connect(self._update_visible_renders)
+        self.verticalScrollBar().valueChanged.connect(self._on_scrolled)
+        self.horizontalScrollBar().valueChanged.connect(lambda _v: self._schedule_render())
+
+        # Yumuşak kaydırma ve zoom animasyonları
+        self._scroll_anim = QVariantAnimation(self)
+        self._scroll_anim.setDuration(170)
+        self._scroll_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._scroll_anim.valueChanged.connect(
+            lambda v: self.verticalScrollBar().setValue(int(round(v))))
+        self._zoom_anim = QVariantAnimation(self)
+        self._zoom_anim.setDuration(150)
+        self._zoom_anim.setEasingCurve(QEasingCurve.Type.OutCubic)
+        self._zoom_anim.valueChanged.connect(self._on_zoom_anim)
+        self._zoom_anchor = QPointF()
+        self._zoom_target = 1.0
+
+        # PySide6, QThreadPool'a verilen bir QRunnable'ın Python nesnesini
+        # canlı tutmayı garanti etmez; bitene kadar burada referans tutuyoruz.
         self._pending_render_tasks: list = []
 
     # =====================================================================
-    # Sayfa render (LRU önbellek + asenkron)
+    # Belge / sayfa yerleşimi
     # =====================================================================
-    def _draw_edit_boxes(self, session, page_index: int) -> None:
-        """'Metin Düzenle' aracı açıkken taranmış satır/paragraf kutularını çizer."""
-        if self.state.tool != "edit":
-            return
-        entry = session.pdf.edit_cache.get((page_index, bool(self.state.edit_force_ocr)))
-        if not entry:
-            return
-        key = "blocks" if self.state.edit_mode == "block" else "lines"
-        pen = QPen(QColor("#3aa0ff"), 0.8, Qt.PenStyle.DashLine)
-        for it in entry[key]:
-            x0, y0, x1, y1 = it.rect
-            box = QGraphicsRectItem(QRectF(x0, y0, x1 - x0, y1 - y0))
-            box.setPen(pen)
-            box.setBrush(QBrush(QColor(58, 160, 255, 28)))
-            box.setZValue(40)
-            box.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
-            self.scene_obj.addItem(box)
+    @property
+    def current_page(self) -> int:
+        return self._current
 
-    def render_page(self, session, page_index: int, invert: bool = False) -> None:
-        self._session = session
-        self._page_index = page_index
-        self._invert = invert
+    @property
+    def _page_index(self) -> Optional[int]:      # eski API uyumluluğu
+        return self._current if self._session is not None else None
 
+    def _ensure_document(self, session, invert: bool) -> bool:
+        """Belge veya sayfa yerleşimi değiştiyse sahneyi yeniden kurar.
+        Yeniden kurulduysa True döner."""
+        if invert != self._invert:
+            self._invert = invert
+            for p in self._pages:
+                p.paper = QColor("#1b1b1d") if invert else QColor("#ffffff")
+                p.drop_pixmap()
+                p.update()
+            self._schedule_render(0)
+        sig = None if session is None else (id(session), session.pdf.layout_rev,
+                                             session.pdf.page_count)
+        if session is self._session and sig == self._layout_sig:
+            return False
+        self._rebuild(session)
+        self._layout_sig = sig
+        return True
+
+    def _rebuild(self, session) -> None:
         scene = self.scene_obj
-        # scene.clear() seçili öğeleri de sildiği için selectionChanged
-        # sinyalini tetikler; bu da _on_selection_changed() içinde henüz
-        # yenisiyle değiştirilmemiş (ve C++ tarafında zaten silinmiş) eski
-        # gizmo'ya erişmeye çalışıp çökmeye yol açabilir. Temizlik boyunca
-        # sinyalleri geçici olarak susturuyoruz.
+        # scene.clear() seçili öğeleri silerken selectionChanged tetikler;
+        # henüz değiştirilmemiş (C++ tarafında silinmiş) gizmo'ya erişilmesin.
         scene.blockSignals(True)
         scene.clear()
         scene.blockSignals(False)
         self.item_ann_map.clear()
         self.ann_item_map.clear()
-        self._search_items = []
+        self.item_page_map.clear()
+        self._pages = []
+        self._tops = []
+        self._temp_item = None
+        self._drawing = False
 
         self.gizmo = SelectionGizmo()
         scene.addItem(self.gizmo)
@@ -150,81 +254,293 @@ class PDFView(QGraphicsView):
         self.gizmo.resizeFinished.connect(self._on_gizmo_resize)
         self._gizmo_target = None
 
+        self._session = session
         if session is None:
-            self._bg_item = None
+            self._current = 0
+            scene.setSceneRect(QRectF(0, 0, 1, 1))
             return
 
-        w, h = session.pdf.page_size(page_index)
-        scene.setSceneRect(0, 0, w, h)
-        self.page_lines = session.pdf.text_lines(page_index)
+        n = session.pdf.page_count
+        sizes = [session.pdf.page_size(i) for i in range(n)]
+        max_w = max((w for w, _ in sizes), default=595.0)
+        y = DOC_MARGIN
+        for i, (w, h) in enumerate(sizes):
+            p = PageItem(i, w, h)
+            if self._invert:
+                p.paper = QColor("#1b1b1d")
+            p.setPos(-w / 2, y)
+            scene.addItem(p)
+            self._pages.append(p)
+            self._tops.append(y)
+            y += h + PAGE_GAP
+        bottom = y - PAGE_GAP + DOC_MARGIN
+        scene.setSceneRect(QRectF(-max_w / 2 - DOC_MARGIN, 0, max_w + 2 * DOC_MARGIN, bottom))
+        self._current = max(0, min(self._current, n - 1))
+        for i in range(n):
+            self._populate_annotations(i)
+        self._apply_search_state(center=False)
+        self._draw_edit_boxes()
+        self._schedule_render(0)
 
-        self._bg_item = scene.addPixmap(QPixmap())
-        self._bg_item.setZValue(-1)
+    def show_page(self, session, index: Optional[int], invert: bool = False,
+                  scroll: bool = True) -> None:
+        """Belgeyi (gerekirse) kurar ve `index` sayfasına gider."""
+        if session is not self._session:
+            self._current = index or 0
+        self._ensure_document(session, invert)
+        if session is None or not self._pages:
+            return
+        index = max(0, min(index or 0, len(self._pages) - 1))
+        changed = index != self._current
+        self._current = index
+        if scroll:
+            self.scroll_to_page(index)
+        if changed:
+            self._draw_edit_boxes()
 
-        cached = None if invert else session.pdf.get_cached_pixmap(page_index)
-        if cached is not None:
-            self._apply_bg_pixmap(cached, w, h)
+    # eski API: goto_page / sekme değişimi vb.
+    def render_page(self, session, page_index: Optional[int], invert: bool = False) -> None:
+        self.show_page(session, page_index, invert)
+
+    def refresh_page(self, index: int) -> None:
+        """Bir sayfanın işaretlerini (ve gerekirse görüntüsünü) tazeler;
+        kaydırma konumuna dokunmaz."""
+        if self._session is None:
+            return
+        if self._ensure_document(self._session, self._invert):
+            return
+        if not (0 <= index < len(self._pages)):
+            return
+        self._populate_annotations(index)
+        self._draw_edit_boxes()
+        self._schedule_render(0)
+
+    def refresh_current_page(self) -> None:
+        self.refresh_page(self._current)
+
+    def set_invert(self, invert: bool) -> None:
+        self._ensure_document(self._session, invert)
+
+    def page_rect_in_scene(self, index: int) -> QRectF:
+        p = self._pages[index]
+        return QRectF(p.pos(), QSizeF(p.w, p.h))
+
+    def _page_index_at_y(self, y: float) -> int:
+        if not self._tops:
+            return 0
+        i = bisect.bisect_right(self._tops, y) - 1
+        return max(0, min(i, len(self._tops) - 1))
+
+    def _page_at(self, scene_pt: QPointF) -> Optional[PageItem]:
+        if not self._pages:
+            return None
+        p = self._pages[self._page_index_at_y(scene_pt.y())]
+        return p if self.page_rect_in_scene(p.index).contains(scene_pt) else None
+
+    def _set_current(self, index: int, emit: bool = True) -> None:
+        if index == self._current:
+            return
+        self._current = index
+        self._draw_edit_boxes()
+        if emit:
+            self.currentPageChanged.emit(index)
+
+    def _on_scrolled(self, _v=None) -> None:
+        self._schedule_render()
+        if not self._pages or self._drawing or self._programmatic_scroll:
+            return
+        vr = self.viewport().rect()
+        probe = self.mapToScene(QPoint(vr.center().x(), int(vr.height() * 0.4)))
+        idx = self._page_index_at_y(probe.y())
+        vbar = self.verticalScrollBar()
+        if vbar.value() >= vbar.maximum() and vbar.maximum() > 0:
+            # en altta: görünür alana tepesi girmiş son sayfa
+            bottom = self.mapToScene(vr.bottomLeft()).y()
+            idx = self._page_index_at_y(bottom)
+        self._set_current(idx)
+
+    def scroll_to_page(self, index: int, emit: bool = False) -> None:
+        if not (0 <= index < len(self._pages)):
+            return
+        self._scroll_anim.stop()
+        r = self.page_rect_in_scene(index)
+        vr = self.viewport().rect()
+        vbar, hbar = self.verticalScrollBar(), self.horizontalScrollBar()
+        top_in_view = self.mapFromScene(r.topLeft()).y()
+        # Sinyaller susturulmaz (QGraphicsView kaymayı bu sinyalle uygular);
+        # bunun yerine sayfa algılaması geçici olarak kapatılır.
+        self._programmatic_scroll = True
+        try:
+            vbar.setValue(vbar.value() + top_in_view - 12)
+        finally:
+            self._programmatic_scroll = False
+        if r.width() * self._zoom <= vr.width():
+            centre_x = self.mapFromScene(QPointF(0, r.top())).x()
+            hbar.setValue(hbar.value() + centre_x - vr.width() // 2)
+        if emit:
+            self._set_current(index)
         else:
-            placeholder = QPixmap(max(1, int(w * RENDER_SCALE)), max(1, int(h * RENDER_SCALE)))
-            placeholder.fill(QColor("#3a3d43"))
-            self._apply_bg_pixmap(placeholder, w, h)
-            self._start_async_render(session, page_index, invert)
+            self._current = index
+        self._schedule_render(0)
 
-        for ann in session.annotations.get(page_index, []):
-            self._add_annotation_item(ann)
-        self._draw_edit_boxes(session, page_index)
-
-    def _apply_bg_pixmap(self, pixmap: QPixmap, w: float, h: float) -> None:
-        if self._bg_item is None:
+    # =====================================================================
+    # Render (görünür sayfalar, zoom'a göre çözünürlük, asenkron)
+    # =====================================================================
+    def _schedule_render(self, delay: int = 70) -> None:
+        if self._session is None:
             return
-        self._bg_item.setPixmap(pixmap)
-        if pixmap.width():
-            self._bg_item.setScale(w / pixmap.width())
+        self._render_timer.start(delay)
 
-    def _start_async_render(self, session, page_index: int, invert: bool) -> None:
-        task = session.pdf.make_render_task(page_index, invert)
+    def _target_scale(self) -> float:
+        s = self._zoom * self.devicePixelRatioF()
+        # 2^(k/4) adımlarına yuvarla: küçük zoom değişimlerinde yeniden render yok
+        q = 2 ** (math.ceil(math.log2(max(s, 0.25)) * 4) / 4)
+        return min(q, 10.0)
+
+    def _visible_range(self):
+        vis = self.mapToScene(self.viewport().rect()).boundingRect()
+        return self._page_index_at_y(vis.top()), self._page_index_at_y(vis.bottom())
+
+    def _update_visible_renders(self) -> None:
+        if self._session is None or not self._pages:
+            return
+        first, last = self._visible_range()
+        n = len(self._pages)
+        target = self._target_scale()
+        order = [self._current] + [i for i in range(first, last + 1) if i != self._current]
+        order += [i for i in (last + 1, first - 1, last + 2) if 0 <= i < n]
+        for i in order:
+            if 0 <= i < n:
+                self._ensure_rendered(self._pages[i], target)
+        lo, hi = first - KEEP_NEIGHBOURS, last + KEEP_NEIGHBOURS
+        for p in self._pages:
+            if (p.index < lo or p.index > hi) and p.render_key is not None:
+                p.drop_pixmap()
+
+    def _ensure_rendered(self, p: PageItem, target: float) -> None:
+        pdf = self._session.pdf
+        cap = math.sqrt(MAX_RENDER_PIXELS / max(1.0, p.w * p.h))
+        scale = min(target, cap)
+        key = (pdf.page_rev(p.index), self._invert, round(scale, 4))
+        if p.render_key == key or p.pending_key == key:
+            return
+        p.pending_key = key
+        session = self._session
+        task = pdf.make_render_task(p.index, self._invert, scale)
         self._pending_render_tasks.append(task)
 
         def _cleanup():
             if task in self._pending_render_tasks:
                 self._pending_render_tasks.remove(task)
 
-        def on_finished(idx, qimg, _session=session, _invert=invert):
+        def on_finished(idx, qimg, _p=p, _key=key, _session=session):
             _cleanup()
-            if self._session is _session and self._page_index == idx and self._invert == _invert:
-                pm = QPixmap.fromImage(qimg)
-                if not _invert:
-                    _session.pdf.cache_pixmap(idx, pm)
-                w, h = _session.pdf.page_size(idx)
-                self._apply_bg_pixmap(pm, w, h)
+            if (self._session is _session and idx < len(self._pages)
+                    and self._pages[idx] is _p and _p.pending_key == _key):
+                _p.pending_key = None
+                _p.set_pixmap(QPixmap.fromImage(qimg), _key)
 
-        def on_failed(_idx, _msg):
+        def on_failed(_idx, _msg, _p=p, _key=key):
             _cleanup()
+            if _p.pending_key == _key:
+                _p.pending_key = None
 
         task.signals.finished.connect(on_finished)
         task.signals.failed.connect(on_failed)
         self.threadpool.start(task)
 
-    def refresh_current_page(self) -> None:
-        if self._session is not None and self._page_index is not None:
-            self.render_page(self._session, self._page_index, self._invert)
+    # =====================================================================
+    # Yakınlaştırma
+    # =====================================================================
+    def zoom(self) -> float:
+        return self._zoom
+
+    def set_zoom(self, z: float, anchor: Optional[QPointF] = None) -> None:
+        """Zoom'u değiştirir; `anchor` (viewport koordinatı) altındaki nokta
+        yerinde kalır. Verilmezse görünümün ortası sabit tutulur."""
+        z = max(ZOOM_MIN, min(ZOOM_MAX, z))
+        if anchor is None:
+            anchor = QPointF(self.viewport().rect().center())
+        a = anchor.toPoint()
+        scene_anchor = self.mapToScene(a)
+        self._zoom = z
+        self.setTransform(QTransform.fromScale(z, z))
+        d = self.mapFromScene(scene_anchor) - a
+        self.horizontalScrollBar().setValue(self.horizontalScrollBar().value() + d.x())
+        self.verticalScrollBar().setValue(self.verticalScrollBar().value() + d.y())
+        self.zoomChanged.emit(z)
+        self._schedule_render(120)
+
+    def animate_zoom(self, z: float, anchor: Optional[QPointF] = None) -> None:
+        z = max(ZOOM_MIN, min(ZOOM_MAX, z))
+        self._zoom_anchor = anchor if anchor is not None else QPointF(self.viewport().rect().center())
+        self._zoom_target = z
+        self._zoom_anim.stop()
+        self._zoom_anim.setStartValue(float(self._zoom))
+        self._zoom_anim.setEndValue(float(z))
+        self._zoom_anim.start()
+
+    def _on_zoom_anim(self, v) -> None:
+        self.set_zoom(float(v), self._zoom_anchor)
+
+    def fit_width(self, index: Optional[int] = None) -> None:
+        if not self._pages:
+            return
+        p = self._pages[self._current if index is None else index]
+        avail = self.viewport().width() - 32
+        if p.w > 0:
+            self.set_zoom(avail / p.w)
+            self.scroll_to_page(p.index)
+
+    def fit_page(self, index: Optional[int] = None) -> None:
+        if not self._pages:
+            return
+        p = self._pages[self._current if index is None else index]
+        vr = self.viewport().rect()
+        if p.w > 0 and p.h > 0:
+            self.set_zoom(min((vr.width() - 32) / p.w, (vr.height() - 32) / p.h))
+            self.scroll_to_page(p.index)
 
     # =====================================================================
     # İşaret <-> Qt öğesi eşlemesi
     # =====================================================================
-    def _add_annotation_item(self, ann: Annotation) -> QGraphicsItem:
+    def _populate_annotations(self, index: int) -> None:
+        p = self._pages[index]
+        for gitem in p.ann_items:
+            ann = self.item_ann_map.pop(gitem, None)
+            if ann is not None and self.ann_item_map.get(id(ann)) is gitem:
+                self.ann_item_map.pop(id(ann), None)
+            self.item_page_map.pop(gitem, None)
+            if gitem.scene() is not None:
+                self.scene_obj.removeItem(gitem)
+        p.ann_items = []
+        for ann in self._session.annotations.get(index, []):
+            self._add_annotation_item(ann, p)
+
+    def _add_annotation_item(self, ann: Annotation, page: Optional[PageItem] = None) -> QGraphicsItem:
+        page = page or self._pages[self._current]
         gitem = ann.create_item()
         gitem.setFlags(QGraphicsItem.GraphicsItemFlag.ItemIsSelectable |
                        QGraphicsItem.GraphicsItemFlag.ItemIsMovable)
-        self.scene_obj.addItem(gitem)
+        gitem.setParentItem(page)
+        page.ann_items.append(gitem)
         self.item_ann_map[gitem] = ann
         self.ann_item_map[id(ann)] = gitem
+        self.item_page_map[gitem] = page.index
         return gitem
+
+    def page_of_item(self, gitem) -> Optional[int]:
+        return self.item_page_map.get(gitem)
+
+    def page_of_annotation(self, ann) -> Optional[int]:
+        gitem = self.ann_item_map.get(id(ann))
+        return self.item_page_map.get(gitem) if gitem is not None else None
 
     def _on_selection_changed(self) -> None:
         items = [it for it in self.scene_obj.selectedItems() if it is not self.gizmo]
         sel_ann = self.item_ann_map.get(items[0]) if len(items) == 1 else None
         if sel_ann is not None and sel_ann.is_resizable():
+            self.gizmo.setParentItem(items[0].parentItem())
             self.gizmo.set_aspect_lock_default(isinstance(sel_ann, ImageAnnotation))
             self.gizmo.set_rect(sel_ann.get_rect())
             self.gizmo.show()
@@ -239,34 +555,83 @@ class PDFView(QGraphicsView):
             self.resizeRequested.emit(self._gizmo_target, old_rect, new_rect)
 
     # =====================================================================
-    # Arama vurguları
+    # 'Metin Düzenle' kutuları ve arama vurguları
     # =====================================================================
+    def _draw_edit_boxes(self) -> None:
+        """'Metin Düzenle' aracı açıkken GEÇERLİ sayfadaki taranmış
+        satır/paragraf kutularını çizer (diğer sayfalardakileri siler)."""
+        for p in self._pages:
+            for it in p.edit_items:
+                if it.scene() is not None:
+                    self.scene_obj.removeItem(it)
+            p.edit_items = []
+        if self.state.tool != "edit" or self._session is None or not self._pages:
+            return
+        p = self._pages[self._current]
+        entry = self._session.pdf.edit_cache.get((p.index, bool(self.state.edit_force_ocr)))
+        if not entry:
+            return
+        key = "blocks" if self.state.edit_mode == "block" else "lines"
+        pen = QPen(QColor("#3aa0ff"), 0.8, Qt.PenStyle.DashLine)
+        for it in entry[key]:
+            x0, y0, x1, y1 = it.rect
+            box = QGraphicsRectItem(QRectF(x0, y0, x1 - x0, y1 - y0), p)
+            box.setPen(pen)
+            box.setBrush(QBrush(QColor(58, 160, 255, 28)))
+            box.setZValue(40)
+            box.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+            p.edit_items.append(box)
+
+    def set_all_search_highlights(self, results: Dict[int, list], active=None,
+                                  center: bool = False) -> None:
+        """results: sayfa -> [fitz.Rect]; active: (sayfa, sıra) ya da None."""
+        self._search_state = (results or {}, active)
+        self._apply_search_state(center)
+
     def set_search_highlights(self, rects: list, active_index: Optional[int] = None) -> None:
-        for it in self._search_items:
-            self.scene_obj.removeItem(it)
-        self._search_items = []
-        for i, r in enumerate(rects):
-            qr = QRectF(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0)
-            item = QGraphicsRectItem(qr)
-            base = QColor("#ff9800") if i == active_index else QColor("#ffeb3b")
-            fill = QColor(base)
-            fill.setAlphaF(0.45)
-            item.setBrush(QBrush(fill))
-            item.setPen(QPen(base.darker(130), 1.5))
-            item.setZValue(500)
-            self.scene_obj.addItem(item)
-            self._search_items.append(item)
-            if i == active_index:
-                self.centerOn(item)
+        """Eski API: yalnızca geçerli sayfanın vurguları."""
+        active = (self._current, active_index) if active_index is not None else None
+        self.set_all_search_highlights({self._current: rects} if rects else {}, active,
+                                       center=active is not None)
+
+    def _apply_search_state(self, center: bool) -> None:
+        for p in self._pages:
+            for it in p.search_items:
+                if it.scene() is not None:
+                    self.scene_obj.removeItem(it)
+            p.search_items = []
+        results, active = self._search_state
+        active_item = None
+        for page, rects in results.items():
+            if not (0 <= page < len(self._pages)):
+                continue
+            p = self._pages[page]
+            for i, r in enumerate(rects):
+                is_active = active == (page, i)
+                item = QGraphicsRectItem(QRectF(r.x0, r.y0, r.x1 - r.x0, r.y1 - r.y0), p)
+                base = QColor("#ff9800") if is_active else QColor("#ffeb3b")
+                fill = QColor(base)
+                fill.setAlphaF(0.45)
+                item.setBrush(QBrush(fill))
+                item.setPen(QPen(base.darker(130), 1.5))
+                item.setZValue(500)
+                item.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                p.search_items.append(item)
+                if is_active:
+                    active_item = item
+        if center and active_item is not None:
+            self.centerOn(active_item)
+            self._on_scrolled()
 
     # =====================================================================
-    # Fare etkileşimi
+    # Fare / klavye etkileşimi
     # =====================================================================
-    def _snap_band(self, scene_pt, force_free):
-        y = scene_pt.y()
-        if self.state.snap and not force_free and self.page_lines:
+    def _snap_band(self, page: PageItem, pt: QPointF, force_free: bool):
+        y = pt.y()
+        lines = self._session.pdf.text_lines(page.index) if self.state.snap and not force_free else []
+        if lines:
             best, best_d = None, 6.0
-            for r in self.page_lines:
+            for r in lines:
                 if r.y0 - best_d <= y <= r.y1 + best_d:
                     d = abs((r.y0 + r.y1) / 2 - y)
                     if d < best_d or best is None:
@@ -276,23 +641,54 @@ class PDFView(QGraphicsView):
         half = self.state.hl_thickness / 2
         return y - half, y + half
 
+    @property
+    def page_lines(self) -> list:                   # eski API uyumluluğu
+        if self._session is None or not self._pages:
+            return []
+        return self._session.pdf.text_lines(self._current)
+
     def _on_context_menu(self, pos):
+        pt = self.mapToScene(pos)
+        page = self._page_at(pt)
+        if page is not None:
+            self._set_current(page.index)
         item = self.itemAt(pos)
         self.contextMenuRequested.emit(item, self.mapToGlobal(pos))
 
+    def _local(self, page: PageItem, scene_pt: QPointF) -> QPointF:
+        lp = page.mapFromScene(scene_pt)
+        return QPointF(min(max(lp.x(), 0.0), page.w), min(max(lp.y(), 0.0), page.h))
+
+    def _add_temp(self, item) -> None:
+        item.setParentItem(self._active_page)
+        item.setZValue(900)
+        self._temp_item = item
+
+    def _start_pan(self, e) -> None:
+        self._panning = True
+        self._pan_last = e.position()
+        self._scroll_anim.stop()
+        self.viewport().setCursor(Qt.CursorShape.ClosedHandCursor)
+
     def mousePressEvent(self, e):
-        if e.button() == Qt.MouseButton.MiddleButton:
-            self._panning = True
-            self._pan_last = e.position()
-            self.setCursor(Qt.CursorShape.ClosedHandCursor)
+        if e.button() == Qt.MouseButton.MiddleButton or \
+                (e.button() == Qt.MouseButton.LeftButton and self._space_down):
+            self._start_pan(e)
             return
 
-        pt = self.mapToScene(e.position().toPoint())
+        scene_pt = self.mapToScene(e.position().toPoint())
+        page = self._page_at(scene_pt)
+        if page is not None:
+            self._set_current(page.index)
         tool = self.state.tool
 
         if tool == "select":
             super().mousePressEvent(e)
             return
+        if page is None:
+            return
+        pt = self._local(page, scene_pt)
+        self._active_page = page
 
         if tool == "text":
             if e.button() == Qt.MouseButton.LeftButton:
@@ -321,55 +717,57 @@ class PDFView(QGraphicsView):
             self._ink_points = [(pt.x(), pt.y())]
             path = QPainterPath()
             path.moveTo(pt)
-            self._temp_item = QGraphicsPathItem(path)
-            pen = self._make_pen(self.state.stroke_color, self.state.pen_width, self.state.pen_opacity)
-            self._temp_item.setPen(pen)
-            self.scene_obj.addItem(self._temp_item)
+            item = QGraphicsPathItem(path)
+            item.setPen(self._make_pen(self.state.stroke_color, self.state.pen_width,
+                                       self.state.pen_opacity))
+            self._add_temp(item)
 
         elif tool == "line":
             self._line_end = pt
-            self._temp_item = QGraphicsPathItem(QPainterPath())
-            self._temp_item.setPen(self._make_pen(self.state.stroke_color, self.state.pen_width,
-                                                   self.state.pen_opacity))
-            self.scene_obj.addItem(self._temp_item)
+            item = QGraphicsPathItem(QPainterPath())
+            item.setPen(self._make_pen(self.state.stroke_color, self.state.pen_width,
+                                       self.state.pen_opacity))
+            self._add_temp(item)
 
         elif tool in ("rect", "oval"):
-            self._temp_item = (QGraphicsEllipseItem() if tool == "oval" else QGraphicsRectItem())
+            item = QGraphicsEllipseItem() if tool == "oval" else QGraphicsRectItem()
             fc = QColor(self.state.fill_color)
             fc.setAlphaF(self.state.fill_opacity)
-            self._temp_item.setBrush(QBrush(fc))
-            self._temp_item.setPen(QPen(self.state.stroke_color, self.state.pen_width))
-            self.scene_obj.addItem(self._temp_item)
+            item.setBrush(QBrush(fc))
+            item.setPen(QPen(self.state.stroke_color, self.state.pen_width))
+            self._add_temp(item)
 
         elif tool == "redact":
-            self._temp_item = QGraphicsRectItem()
-            self._temp_item.setBrush(QBrush(QColor(self.state.redact_color)))
-            self._temp_item.setPen(QPen(QColor("#ff4d4d"), 1.5, Qt.PenStyle.DashLine))
-            self.scene_obj.addItem(self._temp_item)
+            item = QGraphicsRectItem()
+            item.setBrush(QBrush(QColor(self.state.redact_color)))
+            item.setPen(QPen(QColor("#ff4d4d"), 1.5, Qt.PenStyle.DashLine))
+            self._add_temp(item)
 
         elif tool == "crop":
-            self._temp_item = QGraphicsRectItem()
+            item = QGraphicsRectItem()
             fc = QColor("#3a86ff"); fc.setAlphaF(0.12)
-            self._temp_item.setBrush(QBrush(fc))
-            self._temp_item.setPen(QPen(QColor("#3a86ff"), 1.5, Qt.PenStyle.DashLine))
-            self.scene_obj.addItem(self._temp_item)
+            item.setBrush(QBrush(fc))
+            item.setPen(QPen(QColor("#3a86ff"), 1.5, Qt.PenStyle.DashLine))
+            self._add_temp(item)
 
         elif tool == "image":
-            self._temp_item = QGraphicsRectItem()
+            item = QGraphicsRectItem()
             fc = QColor("#2ec4b6"); fc.setAlphaF(0.12)
-            self._temp_item.setBrush(QBrush(fc))
-            self._temp_item.setPen(QPen(QColor("#2ec4b6"), 1.5, Qt.PenStyle.DashLine))
-            self.scene_obj.addItem(self._temp_item)
+            item.setBrush(QBrush(fc))
+            item.setPen(QPen(QColor("#2ec4b6"), 1.5, Qt.PenStyle.DashLine))
+            self._add_temp(item)
 
         elif tool == "highlight":
             force_free = bool(e.modifiers() & Qt.KeyboardModifier.ShiftModifier)
-            self._hl_fixed_y = self._snap_band(pt, force_free)
-            self._temp_item = QGraphicsRectItem()
+            self._hl_fixed_y = self._snap_band(page, pt, force_free)
+            item = QGraphicsRectItem()
             c = QColor(self.state.hl_color)
             c.setAlphaF(self.state.fill_opacity)
-            self._temp_item.setBrush(QBrush(c))
-            self._temp_item.setPen(QPen(Qt.PenStyle.NoPen))
-            self.scene_obj.addItem(self._temp_item)
+            item.setBrush(QBrush(c))
+            item.setPen(QPen(Qt.PenStyle.NoPen))
+            self._add_temp(item)
+        else:
+            self._drawing = False
 
     @staticmethod
     def _make_pen(color, width, opacity):
@@ -407,11 +805,11 @@ class PDFView(QGraphicsView):
             self.verticalScrollBar().setValue(int(self.verticalScrollBar().value() - delta.y()))
             return
 
-        if not self._drawing:
+        if not self._drawing or self._active_page is None:
             super().mouseMoveEvent(e)
             return
 
-        pt = self.mapToScene(e.position().toPoint())
+        pt = self._local(self._active_page, self.mapToScene(e.position().toPoint()))
         tool = self.state.tool
 
         if tool == "ink":
@@ -448,19 +846,23 @@ class PDFView(QGraphicsView):
             self._temp_item.setRect(QRectF(x0, y0, x1 - x0, y1 - y0))
 
     def mouseReleaseEvent(self, e):
-        if e.button() == Qt.MouseButton.MiddleButton and self._panning:
+        if self._panning and e.button() in (Qt.MouseButton.MiddleButton, Qt.MouseButton.LeftButton):
             self._panning = False
-            self.setCursor(Qt.CursorShape.ArrowCursor)
+            if self._space_down:
+                self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+            else:
+                self.viewport().unsetCursor()
+                self._restore_tool_cursor()
             return
 
-        if not self._drawing:
+        if not self._drawing or self._active_page is None:
             super().mouseReleaseEvent(e)
             if self.state.tool == "select":
                 self.itemsMoved.emit()
             return
 
         self._drawing = False
-        pt = self.mapToScene(e.position().toPoint())
+        pt = self._local(self._active_page, self.mapToScene(e.position().toPoint()))
         tool = self.state.tool
         ann = None
 
@@ -515,15 +917,96 @@ class PDFView(QGraphicsView):
 
     def _clear_temp(self):
         if self._temp_item is not None:
-            self.scene_obj.removeItem(self._temp_item)
+            if self._temp_item.scene() is not None:
+                self.scene_obj.removeItem(self._temp_item)
             self._temp_item = None
 
-    def wheelEvent(self, e):
-        if e.modifiers() & Qt.KeyboardModifier.ControlModifier:
-            factor = 1.15 if e.angleDelta().y() > 0 else 1 / 1.15
-            self.scale(factor, factor)
+    def _restore_tool_cursor(self):
+        tool = self.state.tool
+        cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number")
+                  else Qt.CursorShape.CrossCursor if tool != "select"
+                  else Qt.CursorShape.ArrowCursor)
+        self.viewport().setCursor(cursor)
+
+    def keyPressEvent(self, e):
+        if self.scene_obj.focusItem() is None:
+            key = e.key()
+            if key == Qt.Key.Key_Space and not e.isAutoRepeat() and not self._drawing:
+                self._space_down = True
+                self.viewport().setCursor(Qt.CursorShape.OpenHandCursor)
+                return
+            if key == Qt.Key.Key_Space:
+                return
+            if key == Qt.Key.Key_Home and self._pages:
+                self.scroll_to_page(0, emit=True)
+                return
+            if key == Qt.Key.Key_End and self._pages:
+                self.scroll_to_page(len(self._pages) - 1, emit=True)
+                return
+            if key in (Qt.Key.Key_PageDown, Qt.Key.Key_PageUp):
+                step = int(self.viewport().height() * 0.9)
+                self._smooth_scroll_by(step if key == Qt.Key.Key_PageDown else -step)
+                return
+        super().keyPressEvent(e)
+
+    def keyReleaseEvent(self, e):
+        if e.key() == Qt.Key.Key_Space and not e.isAutoRepeat() and self._space_down:
+            self._space_down = False
+            if not self._panning:
+                self._restore_tool_cursor()
+            return
+        super().keyReleaseEvent(e)
+
+    def focusOutEvent(self, e):
+        if self._space_down:
+            self._space_down = False
+            self._restore_tool_cursor()
+        super().focusOutEvent(e)
+
+    def _smooth_scroll_by(self, dy: int) -> None:
+        vbar = self.verticalScrollBar()
+        start = vbar.value()
+        if self._scroll_anim.state() == QAbstractAnimation.State.Running:
+            target = int(self._scroll_anim.endValue()) + dy
         else:
-            super().wheelEvent(e)
+            target = start + dy
+        target = max(vbar.minimum(), min(vbar.maximum(), target))
+        self._scroll_anim.stop()
+        self._scroll_anim.setStartValue(float(start))
+        self._scroll_anim.setEndValue(float(target))
+        self._scroll_anim.start()
+
+    def wheelEvent(self, e):
+        mods = e.modifiers()
+        if mods & Qt.KeyboardModifier.ControlModifier:
+            dy = e.angleDelta().y()
+            if dy == 0:
+                return
+            base = self._zoom_target if self._zoom_anim.state() == QAbstractAnimation.State.Running \
+                else self._zoom
+            target = base * (1.0015 ** dy)
+            if e.pixelDelta().isNull():
+                self.animate_zoom(target, e.position())
+            else:                                   # dokunmatik yüzey: doğrudan
+                self.set_zoom(target, e.position())
+            e.accept()
+            return
+        if not e.pixelDelta().isNull() or mods & Qt.KeyboardModifier.ShiftModifier:
+            super().wheelEvent(e)                   # trackpad / yatay kaydırma
+            return
+        self._smooth_scroll_by(int(-e.angleDelta().y() / 120 * 110))
+        e.accept()
+
+    def viewportEvent(self, e):
+        if e.type() == QEvent.Type.NativeGesture and \
+                e.gestureType() == Qt.NativeGestureType.ZoomNativeGesture:
+            self.set_zoom(self._zoom * (1.0 + e.value()), e.position())
+            return True
+        return super().viewportEvent(e)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        self._schedule_render()
 
 
 # ---------------------------------------------------------------------------
