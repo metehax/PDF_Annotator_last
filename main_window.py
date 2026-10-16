@@ -19,21 +19,21 @@ from typing import Dict, List, Optional, Tuple
 import pymupdf as fitz
 
 from PySide6.QtCore import (
-    QObject, QPoint, QPointF, QRectF, QRunnable, QSettings, QSize, Qt, QThreadPool, QTimer, QUrl,
-    Signal,
+    QEvent, QObject, QPoint, QPointF, QRectF, QRunnable, QSettings, QSize, Qt, QThreadPool, QTimer,
+    QUrl, Signal,
 )
 from PySide6.QtGui import (
-    QAction, QColor, QDesktopServices, QFont, QImage, QKeySequence, QPixmap,
+    QAction, QColor, QDesktopServices, QFont, QImage, QIntValidator, QKeySequence, QPixmap,
     QUndoGroup,
 )
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QColorDialog, QComboBox, QDialog,
-    QDialogButtonBox, QDockWidget, QFileDialog, QFormLayout, QFrame,
+    QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
     QProgressBar, QPushButton,
-    QScrollArea, QSlider, QSpinBox,
-    QSplitter, QStackedWidget, QTabBar, QTabWidget, QToolButton, QTreeWidget,
+    QSizePolicy, QSlider, QSpinBox,
+    QSplitter, QStackedWidget, QTabBar, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
@@ -51,10 +51,16 @@ from pdf_engine import (
 )
 from views import ComparePane, PDFView
 import ocr
-from fonts import DEFAULT_FAMILY, FONT_FAMILIES, register_app_fonts
+from fonts import FONT_FAMILIES, register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon, pixmap as icon_pixmap
+from ui.overlays import FloatingBar
+from ui.sidepanel import SidePanel
+from ui.welcome import WelcomeScreen
 from ui.widgets import THUMB_ASPECT_ROLE, THUMB_ROLE, ThumbnailDelegate
+
+CANVAS_TOP_INSET = 66      # araç kapsülü için çizim alanının üstünde bırakılan boşluk (px)
+RECENT_MAX = 8
 
 _IMG_PATTERNS = " ".join("*" + e for e in IMAGE_EXTS)
 OPEN_FILTER = (f"PDF ve Resimler (*.pdf {_IMG_PATTERNS});;PDF (*.pdf);;"
@@ -562,6 +568,9 @@ class MainWindow(QMainWindow):
         self._color_buttons_by_attr: Dict[str, list] = {}
         self._tool_buttons = []
         self._tool_pages: Dict[str, int] = {}
+        self._last_shape = "rect"
+        self._last_side_page = "pages"
+        self._side_was_open = True
         self._zoom = 1.0
 
         # Karşılaştırma "Eşleştir modu" durumu
@@ -584,56 +593,50 @@ class MainWindow(QMainWindow):
     # =====================================================================
     def _build_ui(self):
         central = QWidget()
+        central.setObjectName("central")
         root = QVBoxLayout(central)
         root.setContentsMargins(0, 0, 0, 0)
         root.setSpacing(0)
+        self._doc_controls = []          # yalnızca belge açıkken etkin olanlar
 
-        top_bar = self._build_top_bar()
-        tb_scroll = QScrollArea()
-        tb_scroll.setWidget(top_bar)
-        tb_scroll.setWidgetResizable(True)
-        tb_scroll.setFrameShape(QFrame.Shape.NoFrame)
-        tb_scroll.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        tb_scroll.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAsNeeded)
-        tb_scroll.setFixedHeight(top_bar.sizeHint().height() + 14)
-        root.addWidget(tb_scroll)
-
-        self.doc_tabbar = QTabBar()
-        self.doc_tabbar.setTabsClosable(True)
-        self.doc_tabbar.setExpanding(False)
-        self.doc_tabbar.setMovable(True)
-        self.doc_tabbar.setObjectName("doctabs")
-        self.doc_tabbar.currentChanged.connect(self._on_tab_changed)
-        self.doc_tabbar.tabCloseRequested.connect(self.close_session)
-        self.doc_tabbar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
-        self.doc_tabbar.customContextMenuRequested.connect(self._on_doctab_context_menu)
-        root.addWidget(self.doc_tabbar)
+        root.addWidget(self._build_top_bar())
 
         body = QHBoxLayout()
-        body.setContentsMargins(10, 10, 0, 0)
-        body.setSpacing(10)
-        body.addWidget(self._build_tool_column())
-        body.addWidget(self._build_canvas_stack(), 1)
+        body.setContentsMargins(0, 0, 0, 0)
+        body.setSpacing(0)
+        self.side = self._build_side_panel()
+        body.addWidget(self.side)
+
+        self.workspace = QWidget()
+        self.workspace.setObjectName("workspace")
+        ws = QVBoxLayout(self.workspace)
+        ws.setContentsMargins(0, 0, 0, 0)
+        self.center_stack = QStackedWidget()
+        self.welcome = WelcomeScreen()
+        self.welcome.openRequested.connect(self.open_pdf)
+        self.welcome.recentRequested.connect(lambda p: self.open_paths([p]))
+        self.center_stack.addWidget(self.welcome)
+        self.center_stack.addWidget(self._build_canvas_stack())
+        ws.addWidget(self.center_stack)
+        body.addWidget(self.workspace, 1)
         body_wrap = QWidget()
         body_wrap.setLayout(body)
         root.addWidget(body_wrap, 1)
 
-        root.addWidget(self._build_bottom_bar())
-
-        self.status = QLabel("PDF açmak için 'Aç' düğmesine tıklayın.")
-        self.status.setObjectName("status")
-        self.status.setContentsMargins(12, 6, 12, 6)
-        root.addWidget(self.status)
-
+        root.addWidget(self._build_status_bar())
         self.setCentralWidget(central)
 
-        self.left_dock = self._build_left_dock()
-        self.right_dock = self._build_right_dock()
-        self.addDockWidget(Qt.DockWidgetArea.LeftDockWidgetArea, self.left_dock)
-        self.addDockWidget(Qt.DockWidgetArea.RightDockWidgetArea, self.right_dock)
-        self.resizeDocks([self.left_dock, self.right_dock], [230, 280], Qt.Orientation.Horizontal)
+        self._build_overlays()
+        self.workspace.installEventFilter(self)
+
+        self._drop_overlay = QLabel("Açmak için bırakın", central)
+        self._drop_overlay.setObjectName("dropOverlay")
+        self._drop_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self._drop_overlay.hide()
+        self.setAcceptDrops(True)
 
         self._build_shortcuts()
+        self._refresh_recent()
 
     # -- ortak küçük yapı taşları ------------------------------------------
     def _framed(self, widget, title):
@@ -648,34 +651,19 @@ class MainWindow(QMainWindow):
         lay.addWidget(widget, 1)
         return frame
 
-    def _toolbar_group(self, title, widgets):
-        frame = QFrame()
-        frame.setObjectName("tbGroup")
-        outer = QVBoxLayout(frame)
-        outer.setContentsMargins(8, 4, 8, 6)
-        outer.setSpacing(3)
-        cap = QLabel(title)
-        cap.setObjectName("tbGroupTitle")
-        outer.addWidget(cap)
-        row = QHBoxLayout()
-        row.setSpacing(6)
-        for w in widgets:
-            row.addWidget(w)
-        outer.addLayout(row)
-        return frame
-
     def _slider_row(self, label, lo, hi, val, setter, suffix=""):
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label)
-        lbl.setFixedWidth(84)
-        h.addWidget(lbl)
+        h.setSpacing(6)
+        h.addWidget(QLabel(label))
         s = QSlider(Qt.Orientation.Horizontal)
         s.setMinimum(lo); s.setMaximum(hi); s.setValue(val)
-        h.addWidget(s, 1)
+        s.setFixedWidth(96)
+        h.addWidget(s)
         val_lbl = QLabel(f"{val}{suffix}")
-        val_lbl.setFixedWidth(36)
+        val_lbl.setObjectName("valueLbl")
+        val_lbl.setMinimumWidth(30)
         h.addWidget(val_lbl)
 
         def on_change(v):
@@ -689,24 +677,23 @@ class MainWindow(QMainWindow):
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label)
-        lbl.setFixedWidth(84)
-        h.addWidget(lbl)
-        h.addWidget(spin, 1)
+        h.setSpacing(6)
+        h.addWidget(QLabel(label))
+        spin.setFixedWidth(72)
+        h.addWidget(spin)
         return row
 
     def _combo_row(self, label, items, on_change):
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label)
-        lbl.setFixedWidth(84)
-        h.addWidget(lbl)
+        h.setSpacing(6)
+        h.addWidget(QLabel(label))
         combo = QComboBox()
         for text, data in items:
             combo.addItem(text, data)
         combo.currentIndexChanged.connect(lambda _i: on_change(combo.currentData()))
-        h.addWidget(combo, 1)
+        h.addWidget(combo)
         return row
 
     def _set_edit_mode(self, mode):
@@ -721,15 +708,15 @@ class MainWindow(QMainWindow):
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel("Yazı tipi")
-        lbl.setFixedWidth(84)
-        h.addWidget(lbl)
+        h.setSpacing(6)
+        h.addWidget(QLabel("Yazı tipi"))
         combo = QComboBox()
         for fam in FONT_FAMILIES:
             combo.addItem(fam)
         combo.setCurrentText(self.state.font_family)
+        combo.setMinimumWidth(140)
         combo.currentTextChanged.connect(lambda t: setattr(self.state, "font_family", t))
-        h.addWidget(combo, 1)
+        h.addWidget(combo)
         self.font_combo_panel = combo
         return row
 
@@ -737,19 +724,17 @@ class MainWindow(QMainWindow):
         row = QWidget()
         h = QHBoxLayout(row)
         h.setContentsMargins(0, 0, 0, 0)
-        lbl = QLabel(label)
-        lbl.setFixedWidth(84)
-        h.addWidget(lbl)
+        h.setSpacing(6)
+        h.addWidget(QLabel(label))
         btn = QPushButton()
         btn.setObjectName("colorbtn")
-        btn.setFixedSize(52, 26)
+        btn.setFixedSize(28, 22)
         btn.setCursor(Qt.CursorShape.PointingHandCursor)
         btn.setToolTip("Renk seç")
         color = getattr(self.state, attr)
         btn.setStyleSheet(f"background:{color.name()};")
         btn.clicked.connect(lambda: self._pick_color(attr))
         h.addWidget(btn)
-        h.addStretch(1)
         self._color_buttons_by_attr.setdefault(attr, []).append(btn)
         return row
 
@@ -779,234 +764,202 @@ class MainWindow(QMainWindow):
             (btn.toggled if checkable else btn.clicked).connect(slot)
         return btn
 
-    # -- üst çubuk ----------------------------------------------------------
-    def _build_top_bar(self):
-        bar = QWidget()
-        bar.setObjectName("toolbar")
-        lay = QHBoxLayout(bar)
-        lay.setContentsMargins(10, 6, 10, 6)
-        lay.setSpacing(0)
-
-        def tb_button(name, text, tooltip=""):
-            b = QToolButton()
-            b.setIcon(icon(name))
-            b.setText(text)
-            b.setIconSize(QSize(18, 18))
-            b.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-            b.setCursor(Qt.CursorShape.PointingHandCursor)
-            if tooltip:
-                b.setToolTip(tooltip)
-            return b
-
-        self.btn_open = tb_button("open", "Aç", "PDF ya da resim aç (Ctrl+O)")
-        self.btn_open.clicked.connect(self.open_pdf)
-
-        self.btn_merge = tb_button("merge", "Birleştir", "Birden çok PDF/resmi tek PDF'te birleştir")
-        self.btn_merge.clicked.connect(self.merge_pdfs)
-
-        self.btn_split = tb_button("scissors", "Ayır")
-        self.btn_split.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        split_menu = QMenu(self.btn_split)
-        split_menu.addAction(icon("images"), "Her sayfayı ayrı PDF yap (klasöre)", self.split_all_pages)
-        split_menu.addAction(icon("scissors"), "Sayfa aralığını yeni PDF olarak çıkar…", self.extract_page_range)
-        self.btn_split.setMenu(split_menu)
-
-        self.btn_export = QToolButton()
-        self.btn_export.setIcon(icon("download", "on_accent"))
-        self.btn_export.setText("Dışa Aktar")
-        self.btn_export.setIconSize(QSize(18, 18))
-        self.btn_export.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
-        self.btn_export.setCursor(Qt.CursorShape.PointingHandCursor)
-        self.btn_export.setObjectName("primary")
-        self.btn_export.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
-        export_menu = QMenu(self.btn_export)
-        export_menu.addAction(icon("file"), "PDF olarak kaydet", self.save_pdf)
-        export_menu.addAction(icon("image"), "Resim olarak kaydet (orijinal çözünürlük)", self.save_as_image)
-        export_menu.addAction(icon("watermark"), "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark)
-        export_menu.addSeparator()
-        export_menu.addAction(icon("image"), "Bu sayfayı PNG", lambda: self.export_image_current("png"))
-        export_menu.addAction(icon("image"), "Bu sayfayı JPEG", lambda: self.export_image_current("jpg"))
-        export_menu.addAction(icon("images"), "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
-        export_menu.addSeparator()
-        export_menu.addAction(icon("project"), "Proje Kaydet (JSON)", self.save_project)
-        export_menu.addAction(icon("folder"), "Proje Aç (JSON)", self.open_project)
-        self.btn_export.setMenu(export_menu)
-
-        lay.addWidget(self._toolbar_group(
-            "DOSYA", [self.btn_open, self.btn_merge, self.btn_split, self.btn_export]))
-
-        self.act_undo = self.undo_group.createUndoAction(self, "Geri Al")
-        self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
-        self.act_redo = self.undo_group.createRedoAction(self, "Yinele")
-        self.act_redo.setShortcut(QKeySequence.StandardKey.Redo)
-        self.btn_undo = self._icon_button("undo", "Geri al (Ctrl+Z)", self.act_undo.trigger)
-        self.btn_undo.setEnabled(False)
-        self.btn_redo = self._icon_button("redo", "Yinele (Ctrl+Y)", self.act_redo.trigger)
-        self.btn_redo.setEnabled(False)
-        self.undo_group.canUndoChanged.connect(self.btn_undo.setEnabled)
-        self.undo_group.canRedoChanged.connect(self.btn_redo.setEnabled)
-        self.addAction(self.act_undo)
-        self.addAction(self.act_redo)
-        lay.addWidget(self._toolbar_group("DÜZENLE", [self.btn_undo, self.btn_redo]))
-
-        self.btn_watermark = self._icon_button(
-            "watermark", "Filigran ekleyip yeni bir PDF olarak kaydet",
-            self.save_pdf_with_watermark, text="Filigran")
-        self.btn_ocr = self._icon_button(
-            "ocr", "Sayfadaki metni OCR ile oku / aranabilir PDF üret",
-            self.open_ocr_dialog, text="OCR")
-        lay.addWidget(self._toolbar_group("ARAÇLAR", [self.btn_watermark, self.btn_ocr]))
-
-        self.btn_theme = self._icon_button("sun", "Açık temaya geç", self.toggle_theme)
-        self.btn_night = self._icon_button(
-            "contrast", "Gece modu: PDF renklerini ters çevirir", self.toggle_night_mode,
-            checkable=True)
-        self.btn_compare = self._icon_button(
-            "compare", "İki belgeyi yan yana karşılaştır", self.toggle_compare_mode,
-            checkable=True, text="Karşılaştır")
-        lay.addWidget(self._toolbar_group("GÖRÜNÜM", [self.btn_compare, self.btn_night, self.btn_theme]))
-
-        lay.addStretch(1)
-        return bar
-
-    # -- sol: dikey araç sütunu ----------------------------------------------
-    def _build_tool_column(self):
-        """Sol kenarda ince, yalnızca ikonlu araç rayı (adı ipucunda)."""
-        rail = QFrame()
-        rail.setObjectName("toolRail")
-        v = QVBoxLayout(rail)
-        v.setContentsMargins(6, 8, 6, 8)
-        v.setSpacing(4)
-        for entry in TOOLS:
-            if entry is None:
-                sep = QFrame()
-                sep.setObjectName("railSep")
-                sep.setFixedHeight(1)
-                v.addWidget(sep)
-                continue
-            key, label, icon_name, desc = entry
-            btn = QToolButton()
-            btn.setIcon(icon(icon_name))
-            btn.setIconSize(QSize(20, 20))
-            btn.setFixedSize(40, 40)
-            btn.setCheckable(True)
-            btn.setObjectName("toolbtn")
-            btn.setToolTip(f"<b>{label}</b><br>{desc}")
-            btn.setCursor(Qt.CursorShape.PointingHandCursor)
-            btn.clicked.connect(lambda _, k=key, b=btn: self._select_tool(k, b))
-            self._tool_buttons.append((key, btn))
-            v.addWidget(btn, 0, Qt.AlignmentFlag.AlignHCenter)
-        v.addStretch(1)
-        rail.setFixedWidth(54)
-        self.btn_select = dict(self._tool_buttons)["select"]
-        wrap = QWidget()
-        wl = QVBoxLayout(wrap)
-        wl.setContentsMargins(0, 0, 0, 10)
-        wl.addWidget(rail)
-        return wrap
-
-    # -- orta: normal görünüm / karşılaştırma ---------------------------------
-    def _build_canvas_stack(self):
-        self.view = PDFView(self.state, self.threadpool)
-        self.view.annotationCreated.connect(self.add_annotation)
-        self.view.textRequested.connect(self.on_text_requested)
-        self.view.numberRequested.connect(self.on_number_requested)
-        self.view.editTextRequested.connect(self.on_edit_text_requested)
-        self.view.cropRequested.connect(self.on_crop_requested)
-        self.view.imagePlaceRequested.connect(self.on_image_place_requested)
-        self.view.itemsMoved.connect(self.sync_moved_items)
-        self.view.resizeRequested.connect(self.on_resize_requested)
-        self.view.contextMenuRequested.connect(self.show_item_context_menu)
-        self.view.currentPageChanged.connect(self._on_view_page_changed)
-        self.view.zoomChanged.connect(self._sync_zoom_slider)
-        normal_frame = self.view
-
-        self.pane_left = ComparePane(lambda: self.sessions, lambda: self.state,
-                                     self.on_number_requested_in_pane,
-                                     night_mode_provider=lambda: self.night_mode)
-        self.pane_right = ComparePane(lambda: self.sessions, lambda: self.state,
-                                      self.on_number_requested_in_pane,
-                                      night_mode_provider=lambda: self.night_mode)
-        splitter = QSplitter(Qt.Orientation.Horizontal)
-        splitter.addWidget(self.pane_left)
-        splitter.addWidget(self.pane_right)
-        compare_frame = self._framed(splitter, "KARŞILAŞTIRMA (salt okunur)")
-
-        self.canvas_stack = QStackedWidget()
-        self.canvas_stack.addWidget(normal_frame)     # index 0
-        self.canvas_stack.addWidget(compare_frame)    # index 1
-        return self.canvas_stack
-
-    # -- alt: yakınlaştırma / görünüm çubuğu ----------------------------------
-    def _build_bottom_bar(self):
-        bar = QWidget()
-        bar.setObjectName("bottombar")
-        h = QHBoxLayout(bar)
-        h.setContentsMargins(10, 4, 10, 4)
-        h.setSpacing(2)
-
-        self.btn_prev = self._icon_button(
-            "chevron_left", "Önceki sayfa",
-            lambda: self.goto_page(self.active_session.current_page - 1) if self.active_session else None)
-        self.lbl_page = QLabel("0 / 0")
-        self.lbl_page.setObjectName("pagelbl")
-        self.btn_next = self._icon_button(
-            "chevron_right", "Sonraki sayfa",
-            lambda: self.goto_page(self.active_session.current_page + 1) if self.active_session else None)
-        h.addWidget(self.btn_prev); h.addWidget(self.lbl_page); h.addWidget(self.btn_next)
-
-        h.addWidget(self._vsep())
-
-        self.btn_rot_ccw = self._icon_button("rotate_ccw", "Sayfayı saatin tersine döndür",
-                                             lambda: self._rotate_current_page(-90))
-        self.btn_rot_cw = self._icon_button("rotate_cw", "Sayfayı saat yönünde döndür",
-                                            lambda: self._rotate_current_page(90))
-        h.addWidget(self.btn_rot_ccw); h.addWidget(self.btn_rot_cw)
-
-        self.btn_add_page = self._icon_button(
-            "file_plus", "Aktif sayfadan sonra boş sayfa ekler",
-            lambda: self._insert_blank_page(self.active_session.current_page + 1)
-            if self.active_session else None)
-        h.addWidget(self.btn_add_page)
-
-        h.addStretch(1)
-
-        self.btn_fit_width = self._icon_button("fit_width", "Genişliğe sığdır", self.fit_width)
-        self.btn_fit_page = self._icon_button("fit_page", "Tam sayfa", self.fit_page)
-        h.addWidget(self.btn_fit_width); h.addWidget(self.btn_fit_page)
-        h.addWidget(self._vsep())
-
-        self.btn_zoom_out = self._icon_button(
-            "zoom_out", "Uzaklaştır (Ctrl + tekerlek)", lambda: self.view.animate_zoom(self.view.zoom() / 1.25))
-        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
-        self.zoom_slider.setRange(10, 800)
-        self.zoom_slider.setValue(100)
-        self.zoom_slider.setFixedWidth(140)
-        self.zoom_slider.valueChanged.connect(self._on_zoom_slider_changed)
-        self.btn_zoom_in = self._icon_button(
-            "zoom_in", "Yakınlaştır (Ctrl + tekerlek)", lambda: self.view.animate_zoom(self.view.zoom() * 1.25))
-        self.lbl_zoom = QLabel("100%")
-        self.lbl_zoom.setObjectName("zoomlbl")
-        h.addWidget(self.btn_zoom_out); h.addWidget(self.zoom_slider)
-        h.addWidget(self.btn_zoom_in); h.addWidget(self.lbl_zoom)
-
-        return bar
-
     def _vsep(self):
         line = QFrame()
         line.setObjectName("sep")
         line.setFixedWidth(1)
         return line
 
-    # -- sol dock: Küçük Resimler / İçindekiler / Ara --------------------------
-    def _build_left_dock(self):
-        dock = QDockWidget("BELGE", self)
-        dock.setObjectName("leftDock")
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                         QDockWidget.DockWidgetFeature.DockWidgetFloatable)
-        tabs = QTabWidget()
+    # -- menüler ------------------------------------------------------------
+    def _action(self, menu, icon_name, text, slot, shortcut=None, needs_doc=True,
+                checkable=False):
+        a = QAction(text, self)
+        if icon_name:
+            a.setIcon(icon(icon_name, "toggle" if checkable else "default"))
+        a.setCheckable(checkable)
+        if shortcut:
+            a.setShortcut(QKeySequence(shortcut))
+            a.setShortcutVisibleInContextMenu(True)
+            self.addAction(a)            # kısayol menü kapalıyken de çalışsın
+        (a.toggled if checkable else a.triggered).connect(slot)
+        if menu is not None:
+            menu.addAction(a)
+        if needs_doc:
+            self._doc_controls.append(a)
+        return a
+
+    def _build_menus(self):
+        A = self._action
+        page = lambda: self.active_session.current_page if self.active_session else 0  # noqa: E731
+
+        m_file = QMenu("Dosya", self)
+        A(m_file, "open", "Aç…", self.open_pdf, "Ctrl+O", needs_doc=False)
+        self.recent_menu = m_file.addMenu(icon("reset"), "Son açılanlar")
+        m_file.addSeparator()
+        A(m_file, "save", "Kaydet", self.save_document, "Ctrl+S")
+        A(m_file, "file", "PDF olarak kaydet…", self.save_pdf, "Ctrl+Shift+S")
+        A(m_file, "image", "Resim olarak kaydet…", self.save_as_image)
+        A(m_file, "watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark)
+        m_exp = m_file.addMenu(icon("download"), "Dışa aktar")
+        self._doc_controls.append(m_exp.menuAction())
+        A(m_exp, "image", "Bu sayfayı PNG", lambda: self.export_image_current("png"))
+        A(m_exp, "image", "Bu sayfayı JPEG", lambda: self.export_image_current("jpg"))
+        A(m_exp, "images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
+        m_file.addSeparator()
+        A(m_file, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
+        A(m_file, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
+        A(m_file, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
+        m_file.addSeparator()
+        A(m_file, "project", "Projeyi kaydet (JSON)…", self.save_project)
+        A(m_file, "folder", "Proje aç (JSON)…", self.open_project, needs_doc=False)
+        m_file.addSeparator()
+        A(m_file, "close", "Sekmeyi kapat", lambda: self.close_session(self.doc_tabbar.currentIndex()),
+          "Ctrl+W")
+        A(m_file, None, "Çıkış", self.close, "Ctrl+Q", needs_doc=False)
+
+        m_edit = QMenu("Düzenle", self)
+        self.act_undo = self.undo_group.createUndoAction(self, "Geri al")
+        self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
+        self.act_undo.setIcon(icon("undo"))
+        self.act_redo = self.undo_group.createRedoAction(self, "Yinele")
+        self.act_redo.setShortcut(QKeySequence.StandardKey.Redo)
+        self.act_redo.setIcon(icon("redo"))
+        self.addAction(self.act_undo)
+        self.addAction(self.act_redo)
+        m_edit.addAction(self.act_undo)
+        m_edit.addAction(self.act_redo)
+        m_edit.addSeparator()
+        A(m_edit, "trash", "Seçileni sil", self.delete_selected, QKeySequence.StandardKey.Delete)
+        m_edit.addSeparator()
+        A(m_edit, "search", "Bul…", self._focus_search, "Ctrl+F")
+
+        m_view = QMenu("Görünüm", self)
+        A(m_view, "zoom_in", "Yakınlaştır", lambda: self.view.animate_zoom(self.view.zoom() * 1.25), "Ctrl+=")
+        A(m_view, "zoom_out", "Uzaklaştır", lambda: self.view.animate_zoom(self.view.zoom() / 1.25), "Ctrl+-")
+        A(m_view, None, "Gerçek boyut (%100)", lambda: self.view.animate_zoom(1.0), "Ctrl+1")
+        A(m_view, "fit_width", "Genişliğe sığdır", self.fit_width, "Ctrl+2")
+        A(m_view, "fit_page", "Tam sayfa", self.fit_page, "Ctrl+0")
+        m_view.addSeparator()
+        A(m_view, "grid", "Kenar paneli", self._toggle_side_panel, "Ctrl+B", needs_doc=False)
+        self.act_night = A(m_view, "contrast", "Gece modu", self.toggle_night_mode, checkable=True)
+        self.act_compare = A(m_view, "compare", "Karşılaştırma modu", self.toggle_compare_mode,
+                             checkable=True)
+        m_view.addSeparator()
+        A(m_view, "moon", "Açık / koyu tema", self.toggle_theme, "Ctrl+Shift+L", needs_doc=False)
+
+        m_doc = QMenu("Belge", self)
+        A(m_doc, "file_plus", "Sonrasına boş sayfa ekle", lambda: self._insert_blank_page(page() + 1))
+        A(m_doc, "file_copy", "Sayfayı kopyala", lambda: self._duplicate_page(page()))
+        A(m_doc, "trash", "Sayfayı sil", lambda: self._delete_page(page()))
+        m_doc.addSeparator()
+        A(m_doc, "rotate_cw", "Saat yönünde döndür", lambda: self._rotate_current_page(90), "Ctrl+R")
+        A(m_doc, "rotate_ccw", "Saatin tersine döndür", lambda: self._rotate_current_page(-90),
+          "Ctrl+Shift+R")
+        m_doc.addSeparator()
+        A(m_doc, "ocr", "OCR (metin tanıma)…", self.open_ocr_dialog)
+        A(m_doc, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
+
+        m_help = QMenu("Yardım", self)
+        A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
+        A(m_help, "app", "Hakkında", self._show_about, needs_doc=False)
+
+        # sağ üstteki "Dışa Aktar" düğmesinin menüsü
+        self.export_menu = QMenu(self)
+        for entry in (
+            ("file", "PDF olarak kaydet", self.save_pdf),
+            ("image", "Resim olarak kaydet (orijinal çözünürlük)", self.save_as_image),
+            ("watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark),
+            None,
+            ("image", "Bu sayfayı PNG", lambda: self.export_image_current("png")),
+            ("image", "Bu sayfayı JPEG", lambda: self.export_image_current("jpg")),
+            ("images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png")),
+            None,
+            ("project", "Projeyi kaydet (JSON)", self.save_project),
+        ):
+            if entry is None:
+                self.export_menu.addSeparator()
+                continue
+            icon_name, text, slot = entry
+            self.export_menu.addAction(icon(icon_name), text, slot)
+        return [("Dosya", m_file), ("Düzenle", m_edit), ("Görünüm", m_view),
+                ("Belge", m_doc), ("Yardım", m_help)]
+
+    # -- üst çubuk ----------------------------------------------------------
+    def _build_top_bar(self):
+        bar = QFrame()
+        bar.setObjectName("topbar")
+        bar.setFixedHeight(50)
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(12, 0, 10, 0)
+        h.setSpacing(2)
+
+        self._logo = QLabel()
+        h.addWidget(self._logo)
+        h.addSpacing(6)
+        for title, menu in self._build_menus():
+            b = QToolButton()
+            b.setObjectName("menuBtn")
+            b.setText(title)
+            b.setMenu(menu)
+            b.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            h.addWidget(b)
+        h.addSpacing(12)
+
+        self.doc_tabbar = QTabBar()
+        self.doc_tabbar.setObjectName("doctabs")
+        self.doc_tabbar.setTabsClosable(True)
+        self.doc_tabbar.setExpanding(False)
+        self.doc_tabbar.setMovable(True)
+        self.doc_tabbar.setDrawBase(False)
+        self.doc_tabbar.setDocumentMode(True)
+        self.doc_tabbar.setElideMode(Qt.TextElideMode.ElideMiddle)
+        self.doc_tabbar.setUsesScrollButtons(True)
+        self.doc_tabbar.currentChanged.connect(self._on_tab_changed)
+        self.doc_tabbar.tabCloseRequested.connect(self.close_session)
+        self.doc_tabbar.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
+        self.doc_tabbar.customContextMenuRequested.connect(self._on_doctab_context_menu)
+        h.addWidget(self.doc_tabbar, 1)
+        h.addSpacing(8)
+
+        self.btn_undo = self._icon_button("undo", "Geri al (Ctrl+Z)", self.act_undo.trigger)
+        self.btn_undo.setEnabled(False)
+        self.btn_redo = self._icon_button("redo", "Yinele (Ctrl+Y)", self.act_redo.trigger)
+        self.btn_redo.setEnabled(False)
+        self.undo_group.canUndoChanged.connect(self.btn_undo.setEnabled)
+        self.undo_group.canRedoChanged.connect(self.btn_redo.setEnabled)
+        h.addWidget(self.btn_undo)
+        h.addWidget(self.btn_redo)
+        h.addSpacing(6)
+
+        self.btn_export = QToolButton()
+        self.btn_export.setObjectName("secondaryTb")
+        self.btn_export.setIcon(icon("download"))
+        self.btn_export.setIconSize(QSize(18, 18))
+        self.btn_export.setText("Dışa Aktar")
+        self.btn_export.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_export.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_export.setMenu(self.export_menu)
+        self.btn_export.setCursor(Qt.CursorShape.PointingHandCursor)
+        h.addWidget(self.btn_export)
+        h.addSpacing(4)
+
+        self.btn_save = QPushButton(icon("save", "on_accent"), "Kaydet")
+        self.btn_save.setObjectName("primary")
+        self.btn_save.setIconSize(QSize(18, 18))
+        self.btn_save.setToolTip("Kaydet (Ctrl+S)")
+        self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_save.clicked.connect(self.save_document)
+        h.addWidget(self.btn_save)
+        self._doc_controls += [self.btn_export, self.btn_save]
+        return bar
+
+    # -- sol: ikon şeridi + kayan panel ------------------------------------------
+    def _build_side_panel(self):
+        side = SidePanel()
 
         self.thumb_list = QListWidget()
+        self.thumb_list.setObjectName("thumbs")
         self.thumb_list.setItemDelegate(ThumbnailDelegate(self.thumb_list))
         self.thumb_list.setResizeMode(QListWidget.ResizeMode.Adjust)
         self.thumb_list.setVerticalScrollMode(QListWidget.ScrollMode.ScrollPerPixel)
@@ -1019,19 +972,20 @@ class MainWindow(QMainWindow):
         self._thumb_timer.setSingleShot(True)
         self._thumb_timer.timeout.connect(self._load_visible_thumbs)
         self.thumb_list.verticalScrollBar().valueChanged.connect(lambda _v: self._thumb_timer.start(60))
-        self.thumb_list.setObjectName("thumbs")
         self.thumb_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.thumb_list.customContextMenuRequested.connect(self._on_thumb_context_menu)
-        tabs.addTab(self.thumb_list, "Sayfalar")
+        side.add_page("pages", "grid", "Sayfalar", self.thumb_list)
 
         self.toc_tree = QTreeWidget()
         self.toc_tree.setHeaderHidden(True)
         self.toc_tree.itemClicked.connect(self._on_toc_item_clicked)
-        tabs.addTab(self.toc_tree, "İçindekiler")
+        side.add_page("toc", "list", "İçindekiler", self.toc_tree)
 
         search_widget = QWidget()
+        search_widget.setObjectName("panelBody")
         sv = QVBoxLayout(search_widget)
-        sv.setContentsMargins(6, 6, 6, 6)
+        sv.setContentsMargins(10, 4, 10, 10)
+        sv.setSpacing(8)
         self.search_edit = QLineEdit()
         self.search_edit.setPlaceholderText("Belgede ara… (Enter)")
         self.search_edit.addAction(icon("search"), QLineEdit.ActionPosition.LeadingPosition)
@@ -1044,51 +998,252 @@ class MainWindow(QMainWindow):
         self.btn_search.clicked.connect(self.run_search)
         self.btn_search_prev = self._icon_button("chevron_up", "Önceki eşleşme", self.goto_prev_search_hit)
         self.btn_search_next = self._icon_button("chevron_down", "Sonraki eşleşme", self.goto_next_search_hit)
-        srow.addWidget(self.btn_search, 1); srow.addWidget(self.btn_search_prev); srow.addWidget(self.btn_search_next)
+        srow.addWidget(self.btn_search, 1)
+        srow.addWidget(self.btn_search_prev)
+        srow.addWidget(self.btn_search_next)
         sv.addLayout(srow)
-        self.search_results_list = QListWidget()
-        self.search_results_list.itemClicked.connect(self._on_search_result_clicked)
-        sv.addWidget(self.search_results_list, 1)
         self.lbl_search_status = QLabel("")
         self.lbl_search_status.setObjectName("hint")
         sv.addWidget(self.lbl_search_status)
-        tabs.addTab(search_widget, "Ara")
-        self.search_tab_index = tabs.indexOf(search_widget)
+        self.search_results_list = QListWidget()
+        self.search_results_list.itemClicked.connect(self._on_search_result_clicked)
+        sv.addWidget(self.search_results_list, 1)
+        side.add_page("search", "search", "Ara", search_widget)
+        self._doc_controls += [self.btn_search, self.btn_search_prev, self.btn_search_next,
+                               self.search_edit]
 
-        self.left_tabs = tabs
-        dock.setWidget(tabs)
-        dock.setMinimumWidth(230)
-        return dock
+        side.add_page("layers", "layers", "Bu sayfadaki işaretler", self._build_layers_tab())
 
-    # -- sağ dock: Özellikler / Katmanlar --------------------------------------
-    def _build_right_dock(self):
-        dock = QDockWidget("ÖZELLİKLER", self)
-        dock.setObjectName("rightDock")
-        dock.setFeatures(QDockWidget.DockWidgetFeature.DockWidgetMovable |
-                         QDockWidget.DockWidgetFeature.DockWidgetFloatable)
-        tabs = QTabWidget()
-        tabs.addTab(self._build_properties_stack(), "Özellikler")
-        tabs.addTab(self._build_layers_tab(), "Katmanlar")
-        self.side_tabs = tabs
-        dock.setWidget(tabs)
-        dock.setMinimumWidth(230)
-        return dock
+        self.btn_theme = side.add_bottom_button("sun", "Açık temaya geç", self.toggle_theme)
+        side.pageChanged.connect(lambda k: setattr(self, "_last_side_page", k) if k else None)
+        side.show_page("pages", animate=False)
+        return side
+
+    def _toggle_side_panel(self):
+        if self.side.is_open():
+            self.side.collapse()
+        else:
+            self.side.show_page(self._last_side_page or "pages")
+
+    # -- orta: normal görünüm / karşılaştırma ---------------------------------
+    def _build_canvas_stack(self):
+        self.view = PDFView(self.state, self.threadpool)
+        self.view.setViewportMargins(0, CANVAS_TOP_INSET, 0, 0)
+        self.view.setAcceptDrops(False)
+        self.view.viewport().setAcceptDrops(False)
+        self.view.annotationCreated.connect(self.add_annotation)
+        self.view.textRequested.connect(self.on_text_requested)
+        self.view.numberRequested.connect(self.on_number_requested)
+        self.view.editTextRequested.connect(self.on_edit_text_requested)
+        self.view.cropRequested.connect(self.on_crop_requested)
+        self.view.imagePlaceRequested.connect(self.on_image_place_requested)
+        self.view.itemsMoved.connect(self.sync_moved_items)
+        self.view.resizeRequested.connect(self.on_resize_requested)
+        self.view.contextMenuRequested.connect(self.show_item_context_menu)
+        self.view.currentPageChanged.connect(self._on_view_page_changed)
+        self.view.zoomChanged.connect(self._sync_zoom_slider)
+        self.view.selectionAnnotationChanged.connect(self._on_selection_ann)
+        self.view.hoveredPageChanged.connect(self._on_hover_page)
+        self.view.zoomChanged.connect(lambda _z: self._place_floating())
+        self.view.verticalScrollBar().valueChanged.connect(lambda _v: self._place_floating())
+        self.view.horizontalScrollBar().valueChanged.connect(lambda _v: self._place_floating())
+
+        self.pane_left = ComparePane(lambda: self.sessions, lambda: self.state,
+                                     self.on_number_requested_in_pane,
+                                     night_mode_provider=lambda: self.night_mode)
+        self.pane_right = ComparePane(lambda: self.sessions, lambda: self.state,
+                                      self.on_number_requested_in_pane,
+                                      night_mode_provider=lambda: self.night_mode)
+        splitter = QSplitter(Qt.Orientation.Horizontal)
+        splitter.addWidget(self.pane_left)
+        splitter.addWidget(self.pane_right)
+        compare_wrap = QWidget()
+        compare_wrap.setObjectName("compareWrap")
+        cw = QVBoxLayout(compare_wrap)
+        cw.setContentsMargins(10, CANVAS_TOP_INSET, 10, 10)
+        cw.addWidget(self._framed(splitter, "KARŞILAŞTIRMA (salt okunur)"))
+
+        self.canvas_stack = QStackedWidget()
+        self.canvas_stack.addWidget(self.view)         # index 0
+        self.canvas_stack.addWidget(compare_wrap)      # index 1
+        return self.canvas_stack
+
+    # -- yüzen çubuklar ------------------------------------------------------------
+    def _build_overlays(self):
+        ws = self.workspace
+        self.capsule = FloatingBar(ws, "capsule", margins=(6, 6, 6, 6), spacing=2)
+        for entry in TOOLS:
+            if entry is None:
+                self.capsule.add_separator()
+                continue
+            key, label, icon_name, desc = entry
+            if key == "oval":
+                self._tool_buttons.append((key, self.btn_shape))
+                continue
+            if key == "rect":
+                b = self.capsule.add_button("rect", "<b>Şekil</b><br>Dörtgen ya da oval çiz",
+                                            checkable=True, size=36, icon_size=20,
+                                            object_name="toolbtn")
+                b.clicked.connect(lambda _=False, b=b: self._select_tool(self._last_shape, b))
+                self.btn_shape = b
+            else:
+                b = self.capsule.add_button(icon_name, f"<b>{label}</b><br>{desc}", checkable=True,
+                                            size=36, icon_size=20, object_name="toolbtn")
+                b.clicked.connect(lambda _=False, k=key, b=b: self._select_tool(k, b))
+            self._tool_buttons.append((key, b))
+        self.btn_select = dict(self._tool_buttons)["select"]
+
+        self.prop_bar = FloatingBar(ws, "propBar", margins=(14, 6, 8, 6))
+        self.prop_bar.add(self._build_properties_stack())
+
+        self.sel_bar = FloatingBar(ws, "miniBar", margins=(4, 4, 4, 4))
+        self.sel_bar.add_button("bring_front", "En öne getir", lambda: self._sel_zorder(True))
+        self.sel_bar.add_button("send_back", "En arkaya gönder", lambda: self._sel_zorder(False))
+        self.sel_bar.add_separator()
+        self.sel_bar.add_button("trash", "Sil (Del)", self.delete_selected, role="danger")
+        self.sel_bar.hide()
+        self._sel_ann = None
+
+        self.page_bar = FloatingBar(ws, "miniBar", margins=(4, 4, 4, 4))
+        hp = lambda: self._hover_page  # noqa: E731
+        self.page_bar.add_button("rotate_ccw", "Saatin tersine döndür", lambda: self._rotate_page(hp(), -90))
+        self.page_bar.add_button("rotate_cw", "Saat yönünde döndür", lambda: self._rotate_page(hp(), 90))
+        self.page_bar.add_separator()
+        self.page_bar.add_button("file_plus", "Sonrasına boş sayfa ekle", lambda: self._insert_blank_page(hp() + 1))
+        self.page_bar.add_button("file_copy", "Sayfayı kopyala", lambda: self._duplicate_page(hp()))
+        self.page_bar.add_separator()
+        self.page_bar.add_button("trash", "Sayfayı sil", lambda: self._delete_page(hp()), role="danger")
+        self.page_bar.hide()
+        self.page_bar.installEventFilter(self)
+        self._hover_page = -1
+        self._page_bar_timer = QTimer(self)
+        self._page_bar_timer.setSingleShot(True)
+        self._page_bar_timer.setInterval(300)
+        self._page_bar_timer.timeout.connect(self._maybe_hide_page_bar)
+
+    # -- alt durum çubuğu -------------------------------------------------------
+    def _build_status_bar(self):
+        bar = QFrame()
+        bar.setObjectName("statusbar")
+        bar.setFixedHeight(36)
+        h = QHBoxLayout(bar)
+        h.setContentsMargins(14, 0, 8, 0)
+        h.setSpacing(2)
+
+        self.status = QLabel("Başlamak için bir dosya açın ya da pencereye sürükleyin.")
+        self.status.setObjectName("status")
+        h.addWidget(self.status, 1)
+
+        self.btn_prev = self._icon_button(
+            "chevron_left", "Önceki sayfa",
+            lambda: self.goto_page(self.active_session.current_page - 1) if self.active_session else None)
+        self.page_edit = QLineEdit("0")
+        self.page_edit.setObjectName("pageEdit")
+        self.page_edit.setFixedWidth(46)
+        self.page_edit.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        self.page_edit.setValidator(QIntValidator(1, 99999, self))
+        self.page_edit.setToolTip("Sayfa numarasını yazıp Enter'a basın")
+        self.page_edit.returnPressed.connect(
+            lambda: self.goto_page(int(self.page_edit.text() or 1) - 1) if self.active_session else None)
+        self.lbl_page_total = QLabel("/ 0")
+        self.lbl_page_total.setObjectName("pageTotal")
+        self.btn_next = self._icon_button(
+            "chevron_right", "Sonraki sayfa",
+            lambda: self.goto_page(self.active_session.current_page + 1) if self.active_session else None)
+        for w in (self.btn_prev, self.page_edit, self.lbl_page_total, self.btn_next):
+            h.addWidget(w)
+        h.addWidget(self._vsep())
+
+        self.btn_fit_width = self._icon_button("fit_width", "Genişliğe sığdır (Ctrl+2)", self.fit_width)
+        self.btn_fit_page = self._icon_button("fit_page", "Tam sayfa (Ctrl+0)", self.fit_page)
+        h.addWidget(self.btn_fit_width)
+        h.addWidget(self.btn_fit_page)
+        h.addWidget(self._vsep())
+
+        self.btn_zoom_out = self._icon_button(
+            "zoom_out", "Uzaklaştır (Ctrl -)", lambda: self.view.animate_zoom(self.view.zoom() / 1.25))
+        self.zoom_slider = QSlider(Qt.Orientation.Horizontal)
+        self.zoom_slider.setRange(10, 800)
+        self.zoom_slider.setValue(100)
+        self.zoom_slider.setFixedWidth(120)
+        self.zoom_slider.valueChanged.connect(self._on_zoom_slider_changed)
+        self.btn_zoom_in = self._icon_button(
+            "zoom_in", "Yakınlaştır (Ctrl +)", lambda: self.view.animate_zoom(self.view.zoom() * 1.25))
+        self.lbl_zoom = QToolButton()
+        self.lbl_zoom.setObjectName("zoomBtn")
+        self.lbl_zoom.setText("100%")
+        self.lbl_zoom.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.lbl_zoom.setCursor(Qt.CursorShape.PointingHandCursor)
+        zmenu = QMenu(self.lbl_zoom)
+        for pct in (50, 75, 100, 125, 150, 200, 300, 400):
+            zmenu.addAction(f"%{pct}", lambda p=pct: self.view.animate_zoom(p / 100.0))
+        zmenu.addSeparator()
+        zmenu.addAction(icon("fit_width"), "Genişliğe sığdır", self.fit_width)
+        zmenu.addAction(icon("fit_page"), "Tam sayfa", self.fit_page)
+        self.lbl_zoom.setMenu(zmenu)
+        for w in (self.btn_zoom_out, self.zoom_slider, self.btn_zoom_in, self.lbl_zoom):
+            h.addWidget(w)
+        h.addWidget(self._vsep())
+
+        self.btn_night = QToolButton()
+        self.btn_night.setObjectName("iconbtn")
+        self.btn_night.setDefaultAction(self.act_night)
+        self.btn_night.setIconSize(QSize(18, 18))
+        self.btn_night.setToolTip("Gece modu: PDF renklerini ters çevirir")
+        self.btn_compare = QToolButton()
+        self.btn_compare.setObjectName("iconbtn")
+        self.btn_compare.setDefaultAction(self.act_compare)
+        self.btn_compare.setIconSize(QSize(18, 18))
+        self.btn_compare.setToolTip("İki belgeyi yan yana karşılaştır")
+        h.addWidget(self.btn_night)
+        h.addWidget(self.btn_compare)
+
+        self._doc_controls += [self.btn_prev, self.btn_next, self.page_edit, self.btn_fit_width,
+                               self.btn_fit_page, self.btn_zoom_out, self.zoom_slider,
+                               self.btn_zoom_in, self.lbl_zoom]
+        return bar
 
     def _build_properties_stack(self):
         self.prop_stack = QStackedWidget()
 
         def page(*rows):
+            """Yatay özellik çubuğu sayfası. İpucu etiketleri çubuğa eklenmez;
+            sondaki (i) düğmesinin ipucunda gösterilir (kontrol yoksa satır içi)."""
             w = QWidget()
             w.setObjectName("propPage")
-            v = QVBoxLayout(w)
-            v.setContentsMargins(14, 12, 14, 14)
-            v.setSpacing(12)
+            h = QHBoxLayout(w)
+            h.setContentsMargins(0, 0, 0, 0)
+            h.setSpacing(14)
             title = QLabel()
             title.setObjectName("propTitle")
-            v.addWidget(title)
+            h.addWidget(title)
+            sep = QFrame()
+            sep.setObjectName("barSep")
+            sep.setFixedSize(1, 22)
+            h.addWidget(sep)
+            hints, warn, controls = [], False, 0
             for r in rows:
-                v.addWidget(r)
-            v.addStretch(1)
+                if isinstance(r, QLabel) and r.objectName() in ("hint", "hintWarn"):
+                    hints.append(r.text())
+                    warn = warn or r.objectName() == "hintWarn"
+                    continue
+                h.addWidget(r)
+                controls += 1
+            if hints and controls == 0:
+                inline = QLabel(hints[0].replace("\n", " "))
+                inline.setObjectName("hint")
+                inline.setWordWrap(True)
+                inline.setMaximumWidth(520)
+                h.addWidget(inline)
+                hints = hints[1:]
+            if hints:
+                info = QToolButton()
+                info.setObjectName("barBtn")
+                info.setIcon(icon("warning" if warn else "info", "accent" if not warn else "default"))
+                info.setIconSize(QSize(18, 18))
+                info.setFixedSize(30, 30)
+                info.setToolTip("<br><br>".join(t.replace("\n", "<br>") for t in hints))
+                h.addWidget(info)
             w.title_label = title
             return w
 
@@ -1144,7 +1299,20 @@ class MainWindow(QMainWindow):
         ))
         self._tool_pages["line"] = idx; idx += 1
 
+        seg = QWidget()
+        sh = QHBoxLayout(seg)
+        sh.setContentsMargins(0, 0, 0, 0)
+        sh.setSpacing(2)
+        self.btn_shape_rect = QPushButton(icon("rect", "toggle"), "Dörtgen")
+        self.btn_shape_oval = QPushButton(icon("oval", "toggle"), "Oval")
+        for b, k in ((self.btn_shape_rect, "rect"), (self.btn_shape_oval, "oval")):
+            b.setCheckable(True)
+            b.setObjectName("segBtn")
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.clicked.connect(lambda _=False, k=k: self._select_tool(k, self.btn_shape))
+            sh.addWidget(b)
         shape_page = page(
+            seg,
             self._color_row("Dolgu", "fill_color"),
             self._color_row("Kenar", "stroke_color"),
             self._slider_row("Kenar Kal.", 0, 15, int(self.state.pen_width),
@@ -1255,14 +1423,10 @@ class MainWindow(QMainWindow):
             a.triggered.connect(fn)
             self.addAction(a)
 
-        act("Ctrl+O", self.open_pdf)
-        act("Ctrl+S", self.save_document)
-        act("Ctrl+F", self._focus_search)
         act("Right", lambda: self.goto_page(self.active_session.current_page + 1)
             if self.active_session else None)
         act("Left", lambda: self.goto_page(self.active_session.current_page - 1)
             if self.active_session else None)
-        act(QKeySequence.StandardKey.Delete, self.delete_selected)
 
     # =====================================================================
     # Tema (renk şeması) + Gece Modu (PDF piksel ters çevirme)
@@ -1271,9 +1435,12 @@ class MainWindow(QMainWindow):
         self.setStyleSheet(ui_theme.apply(QApplication.instance(), "dark" if self.dark_mode else "light"))
         t = ui_theme.current()
         self.view.set_canvas_color(QColor(t["canvas"]))
-        if hasattr(self, "btn_theme"):
-            self.btn_theme.setIcon(icon("sun" if self.dark_mode else "moon"))
-            self.btn_theme.setToolTip("Açık temaya geç" if self.dark_mode else "Koyu temaya geç")
+        self.btn_theme.setIcon(icon("sun" if self.dark_mode else "moon"))
+        self.btn_theme.setToolTip("Açık temaya geç" if self.dark_mode else "Koyu temaya geç")
+        self._logo.setPixmap(icon_pixmap("app", 22, t["accent"], self.devicePixelRatioF()))
+        for bar in self.findChildren(FloatingBar):
+            bar.refresh_theme()
+        self.welcome.refresh_theme()
         for w in self.findChildren(QWidget):
             w.update()
 
@@ -1289,14 +1456,248 @@ class MainWindow(QMainWindow):
         self.pane_right._render()
 
     def _set_ui_enabled(self, on):
-        for w in (self.btn_export, self.btn_split, self.btn_merge, self.btn_prev, self.btn_next,
-                  self.btn_fit_width, self.btn_fit_page, self.btn_add_page, self.btn_compare,
-                  self.btn_rot_ccw, self.btn_rot_cw, self.btn_watermark, self.zoom_slider,
-                  self.btn_zoom_in, self.btn_zoom_out,
-                  self.btn_search, self.btn_search_prev, self.btn_search_next, self.search_edit):
+        for w in self._doc_controls:
             w.setEnabled(on)
         for _, b in self._tool_buttons:
             b.setEnabled(on)
+        self.center_stack.setCurrentIndex(1 if on else 0)
+        self.capsule.setVisible(on)
+        for b in self.side.page_buttons():
+            b.setEnabled(on)
+        if on and not self.side.is_open() and self._side_was_open:
+            self.side.show_page(self._last_side_page or "pages")
+        elif not on:
+            self._side_was_open = self.side.is_open() or getattr(self, "_side_was_open", True)
+            self.side.collapse(animate=False)
+        if not on:
+            self.sel_bar.hide()
+            self.page_bar.hide()
+            self._update_page_label(-1, 0)
+        self._layout_overlays()
+
+    # =====================================================================
+    # Yüzen çubuklar: araç kapsülü, özellik çubuğu, seçim ve sayfa çubukları
+    # =====================================================================
+    def eventFilter(self, obj, ev):
+        et = ev.type()
+        if obj is self.workspace and et == QEvent.Type.Resize:
+            self._layout_overlays()
+        elif obj is self.page_bar and et == QEvent.Type.Leave:
+            self._page_bar_timer.start()
+        return super().eventFilter(obj, ev)
+
+    def resizeEvent(self, e):
+        super().resizeEvent(e)
+        if self._drop_overlay.isVisible():
+            self._drop_overlay.setGeometry(self.centralWidget().rect())
+
+    def _layout_overlays(self):
+        if not hasattr(self, "capsule"):
+            return
+        W = self.workspace.width()
+        self.capsule.fit()
+        self.capsule.move(max(8, (W - self.capsule.width()) // 2), 10)
+        self.capsule.raise_()
+        self._update_prop_bar()
+        self._place_floating()
+
+    def _update_prop_bar(self):
+        if not hasattr(self, "prop_bar"):
+            return
+        tool = self.state.tool
+        show = (self.active_session is not None and tool != "select"
+                and not self.act_compare.isChecked() and tool in self._tool_pages)
+        if not show:
+            self.prop_bar.hide()
+            return
+        cur = self._tool_pages[tool]
+        # QStackedWidget en geniş sayfaya göre boyutlanır; yalnızca aktif sayfa sayılsın
+        for i in range(self.prop_stack.count()):
+            pol = QSizePolicy.Policy.Preferred if i == cur else QSizePolicy.Policy.Ignored
+            self.prop_stack.widget(i).setSizePolicy(pol, pol)
+        self.prop_stack.setCurrentIndex(cur)
+        self.prop_stack.adjustSize()
+        self.prop_bar.fit(max_width=self.workspace.width() - 24)
+        W = self.workspace.width()
+        self.prop_bar.move(max(12, (W - self.prop_bar.width()) // 2),
+                           self.capsule.y() + self.capsule.height() + 8)
+        self.prop_bar.show()
+        self.prop_bar.raise_()
+
+    def _to_workspace(self, scene_pt):
+        vp = self.view.mapFromScene(scene_pt)
+        return self.view.viewport().mapTo(self.workspace, vp)
+
+    def _place_floating(self):
+        if not hasattr(self, "sel_bar"):
+            return
+        top_limit = CANVAS_TOP_INSET + 8
+        if self.prop_bar.isVisible():
+            top_limit = max(top_limit, self.prop_bar.geometry().bottom() + 8)
+        W = self.workspace.width()
+        # seçim çubuğu: seçili işaretin üstünde (yer yoksa altında)
+        gitem = self.view.ann_item_map.get(id(self._sel_ann)) if self._sel_ann is not None else None
+        if gitem is not None and gitem.scene() is not None and self.canvas_stack.currentIndex() == 0:
+            r = gitem.sceneBoundingRect()
+            self.sel_bar.fit()
+            top = self._to_workspace(QPointF(r.center().x(), r.top()))
+            bottom = self._to_workspace(QPointF(r.center().x(), r.bottom()))
+            y = top.y() - self.sel_bar.height() - 10
+            if y < top_limit:
+                y = bottom.y() + 10
+            x = min(max(8, top.x() - self.sel_bar.width() // 2), W - self.sel_bar.width() - 8)
+            self.sel_bar.move(x, y)
+            self.sel_bar.setVisible(top_limit <= y <= self.workspace.height() - self.sel_bar.height())
+            self.sel_bar.raise_()
+        else:
+            self.sel_bar.hide()
+        # sayfa çubuğu: üzerinde durulan sayfanın sağ üst köşesi
+        s = self.active_session
+        if self._hover_page >= 0 and s and self._hover_page < s.pdf.page_count \
+                and self.state.tool == "select" and self.canvas_stack.currentIndex() == 0:
+            r = self.view.page_rect_in_scene(self._hover_page)
+            self.page_bar.fit()
+            tr = self._to_workspace(r.topRight())
+            br = self._to_workspace(r.bottomRight())
+            x = min(tr.x() - self.page_bar.width() - 10, W - self.page_bar.width() - 8)
+            y = max(tr.y() + 10, top_limit)
+            visible = y + self.page_bar.height() < br.y() - 10
+            self.page_bar.move(max(8, x), y)
+            self.page_bar.setVisible(visible)
+            self.page_bar.raise_()
+        else:
+            self.page_bar.hide()
+
+    def _on_selection_ann(self, ann):
+        self._sel_ann = ann if self.state.tool == "select" else None
+        self._place_floating()
+
+    def _sel_zorder(self, to_front):
+        s = self.active_session
+        ann = self._sel_ann
+        if not s or ann is None:
+            return
+        page = self.view.page_of_annotation(ann)
+        s.undo_stack.push(ZOrderCommand(s, s.current_page if page is None else page, ann, to_front,
+                                        on_change=self._on_session_change))
+
+    def _on_hover_page(self, idx):
+        if idx >= 0:
+            self._page_bar_timer.stop()
+            if idx != self._hover_page:
+                self._hover_page = idx
+                self._place_floating()
+            elif not self.page_bar.isVisible():
+                self._place_floating()
+        else:
+            self._page_bar_timer.start()
+
+    def _maybe_hide_page_bar(self):
+        if self.page_bar.underMouse():
+            return
+        self._hover_page = -1
+        self.page_bar.hide()
+
+    def _update_page_label(self, index, count):
+        self.page_edit.setText(str(index + 1) if count else "")
+        self.lbl_page_total.setText(f"/ {count}")
+
+    # =====================================================================
+    # Dosya açma: iletişim kutusu, son açılanlar, sürükle-bırak
+    # =====================================================================
+    def open_paths(self, paths):
+        last_idx = None
+        for p in paths:
+            try:
+                self._open_path_as_session(p)
+                last_idx = len(self.sessions) - 1
+            except Exception as ex:
+                QMessageBox.critical(self, "Hata", f"'{p}' açılamadı:\n{ex}")
+        if last_idx is None:
+            return
+        self._set_ui_enabled(True)
+        self.refresh_doc_tabs()
+        self.switch_session(last_idx)
+
+    def _recent_paths(self):
+        v = self.settings.value("recent", [])
+        if isinstance(v, str):
+            v = [v]
+        return [p for p in (v or []) if isinstance(p, str)]
+
+    def _add_recent(self, path):
+        path = os.path.abspath(path)
+        items = [p for p in self._recent_paths() if os.path.normcase(p) != os.path.normcase(path)]
+        self.settings.setValue("recent", [path] + items[:RECENT_MAX - 1])
+        self._refresh_recent()
+
+    def _refresh_recent(self):
+        paths = [p for p in self._recent_paths() if os.path.exists(p)]
+        self.welcome.set_recent(paths)
+        self.recent_menu.clear()
+        for p in paths:
+            self.recent_menu.addAction(icon("file" if p.lower().endswith(".pdf") else "image"),
+                                       os.path.basename(p), lambda path=p: self.open_paths([path]))
+        if not paths:
+            a = self.recent_menu.addAction("(henüz yok)")
+            a.setEnabled(False)
+
+    @staticmethod
+    def _dropped_paths(mime):
+        if not mime.hasUrls():
+            return []
+        out = []
+        for url in mime.urls():
+            path = url.toLocalFile()
+            if path and (path.lower().endswith(".pdf") or is_image_path(path)) and os.path.isfile(path):
+                out.append(path)
+        return out
+
+    def dragEnterEvent(self, e):
+        if self._dropped_paths(e.mimeData()):
+            e.acceptProposedAction()
+            self._drop_overlay.setGeometry(self.centralWidget().rect())
+            self._drop_overlay.show()
+            self._drop_overlay.raise_()
+        else:
+            e.ignore()
+
+    def dragMoveEvent(self, e):
+        if self._dropped_paths(e.mimeData()):
+            e.acceptProposedAction()
+
+    def dragLeaveEvent(self, e):
+        self._drop_overlay.hide()
+
+    def dropEvent(self, e):
+        self._drop_overlay.hide()
+        paths = self._dropped_paths(e.mimeData())
+        if paths:
+            e.acceptProposedAction()
+            self.open_paths(paths)
+
+    # =====================================================================
+    # Yardım
+    # =====================================================================
+    def _show_shortcuts(self):
+        rows = [
+            ("Ctrl+O", "Dosya aç"), ("Ctrl+S", "Kaydet"), ("Ctrl+Shift+S", "PDF olarak kaydet"),
+            ("Ctrl+W", "Sekmeyi kapat"), ("Ctrl+Z / Ctrl+Y", "Geri al / Yinele"),
+            ("Del", "Seçileni sil"), ("Ctrl+F", "Bul"), ("Ctrl+B", "Kenar paneli"),
+            ("Ctrl + tekerlek", "Yakınlaştır / uzaklaştır"), ("Ctrl+= / Ctrl+-", "Yakınlaştır / uzaklaştır"),
+            ("Ctrl+0 / Ctrl+1 / Ctrl+2", "Tam sayfa / %100 / Genişliğe sığdır"),
+            ("Boşluk + sürükle", "Sayfayı kaydır"), ("Orta tuş + sürükle", "Sayfayı kaydır"),
+            ("Home / End", "İlk / son sayfa"), ("PgUp / PgDn", "Ekran ekran kaydır"),
+            ("← / →", "Önceki / sonraki sayfa"), ("Ctrl+R / Ctrl+Shift+R", "Sayfayı döndür"),
+        ]
+        html = "<table cellspacing='0' cellpadding='5'>" + "".join(
+            f"<tr><td><b>{k}</b></td><td>{v}</td></tr>" for k, v in rows) + "</table>"
+        QMessageBox.information(self, "Klavye kısayolları", html)
+
+    def _show_about(self):
+        QMessageBox.about(self, "Hakkında",
+                          "<b>PDF İşaretleme Aracı</b><br><br>PDF ve resimler için işaretleme, "
+                          "düzenleme, OCR, filigran ve karşılaştırma aracı.<br>PySide6 + PyMuPDF")
 
     # =====================================================================
     # Araç / renk seçimi
@@ -1310,8 +1711,18 @@ class MainWindow(QMainWindow):
                 self._scan_current_page_for_edit()
         for _, b in self._tool_buttons:
             b.setChecked(b is btn)
+        if tool in ("rect", "oval"):
+            self._last_shape = tool
+            self.btn_shape.setIcon(icon(tool))
+            self.btn_shape_rect.setChecked(tool == "rect")
+            self.btn_shape_oval.setChecked(tool == "oval")
         if tool in self._tool_pages:
             self.prop_stack.setCurrentIndex(self._tool_pages[tool])
+        if tool != "select":
+            self._sel_ann = None
+            self._hover_page = -1
+        self._update_prop_bar()
+        self._place_floating()
         if tool == "number":
             self._refresh_number_label()
         cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number")
@@ -1333,6 +1744,7 @@ class MainWindow(QMainWindow):
     def _open_path_as_session(self, path):
         pdf = PDFDocument(path)
         session = DocumentSession(pdf, path)
+        self._add_recent(path)
         self.undo_group.addStack(session.undo_stack)
         self.sessions.append(session)
         return session
@@ -1340,20 +1752,8 @@ class MainWindow(QMainWindow):
     def open_pdf(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "PDF / Resim Aç (birden fazla seçilebilir)",
                                                  "", OPEN_FILTER)
-        if not paths:
-            return
-        last_idx = None
-        for p in paths:
-            try:
-                self._open_path_as_session(p)
-                last_idx = len(self.sessions) - 1
-            except Exception as ex:
-                QMessageBox.critical(self, "Hata", f"'{p}' açılamadı:\n{ex}")
-        if last_idx is None:
-            return
-        self._set_ui_enabled(True)
-        self.refresh_doc_tabs()
-        self.switch_session(last_idx)
+        if paths:
+            self.open_paths(paths)
 
     def refresh_doc_tabs(self):
         self.doc_tabbar.blockSignals(True)
@@ -1429,7 +1829,7 @@ class MainWindow(QMainWindow):
             self.thumb_list.clear()
             self.toc_tree.clear()
             self.view.render_page(None, None)
-            self.lbl_page.setText("0 / 0")
+            self._update_page_label(-1, 0)
             self.status.setText("Tüm belgeler kapatıldı.")
             self.refresh_doc_tabs()
             return
@@ -1777,6 +2177,12 @@ class MainWindow(QMainWindow):
         row = self.thumb_list.indexAt(pos).row()
         if row < 0:
             return
+        self._page_menu(row, self.thumb_list.viewport().mapToGlobal(pos))
+
+    def _page_menu(self, row, global_pos):
+        s = self.active_session
+        if not s:
+            return
         menu = QMenu(self)
         act_before = menu.addAction(icon("file_plus"), "Öncesine Boş Sayfa Ekle")
         act_after = menu.addAction(icon("file_plus"), "Sonrasına Boş Sayfa Ekle")
@@ -1789,7 +2195,7 @@ class MainWindow(QMainWindow):
         act_rot_ccw = menu.addAction(icon("rotate_ccw"), "Tersine Döndür")
         menu.addSeparator()
         act_del = menu.addAction(icon("trash", "danger"), "Sayfayı Sil")
-        chosen = menu.exec(self.thumb_list.viewport().mapToGlobal(pos))
+        chosen = menu.exec(global_pos)
         if chosen == act_before:
             self._insert_blank_page(row)
         elif chosen == act_after:
@@ -1917,7 +2323,7 @@ class MainWindow(QMainWindow):
 
     def _after_page_change(self, index):
         s = self.active_session
-        self.lbl_page.setText(f"{index + 1} / {s.pdf.page_count}")
+        self._update_page_label(index, s.pdf.page_count)
         if self.thumb_list.currentRow() != index:
             self.thumb_list.blockSignals(True)
             self.thumb_list.setCurrentRow(index)
@@ -1958,7 +2364,7 @@ class MainWindow(QMainWindow):
     def _focus_search(self):
         if not self.active_session:
             return
-        self.left_tabs.setCurrentIndex(self.search_tab_index)
+        self.side.show_page("search")
         self.search_edit.setFocus()
         self.search_edit.selectAll()
 
@@ -2519,6 +2925,9 @@ class MainWindow(QMainWindow):
 
     def show_item_context_menu(self, gitem, global_pos):
         if gitem is None or gitem not in self.view.item_ann_map:
+            # işaret değil: sayfanın kendisine sağ tıklandı
+            if self.active_session and self.canvas_stack.currentIndex() == 0:
+                self._page_menu(self.active_session.current_page, global_pos)
             return
         menu = QMenu(self)
         act_front = menu.addAction(icon("bring_front"), "En Öne Getir")
@@ -2632,6 +3041,8 @@ class MainWindow(QMainWindow):
                 self.pane_right.combo.setCurrentIndex(1)
         else:
             self._select_tool("select", self.btn_select)
+        self._update_prop_bar()
+        self._place_floating()
 
     # =====================================================================
     # Kapatma

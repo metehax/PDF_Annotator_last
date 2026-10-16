@@ -252,12 +252,12 @@ QTabBar::tab {{ background:transparent; color:{t['text_muted']}; padding:7px 12p
     margin:6px 2px 6px 0; border-radius:8px; }}
 QTabBar::tab:hover {{ background:{t['hover']}; color:{t['text']}; }}
 QTabBar::tab:selected {{ background:{t['surface2']}; color:{t['text']}; font-weight:600; }}
-QTabBar#doctabs {{ background:{t['bg']}; }}
-QTabBar#doctabs::tab {{ background:transparent; color:{t['text_muted']}; padding:7px 10px 7px 14px;
-    margin:6px 0 0 6px; border-top-left-radius:10px; border-top-right-radius:10px;
-    border-bottom-left-radius:0; border-bottom-right-radius:0; min-width:90px; }}
+QTabBar#doctabs {{ background:transparent; }}
+QTabBar#doctabs::tab {{ background:transparent; color:{t['text_muted']}; padding:6px 8px 6px 12px;
+    margin:0 2px; border:1px solid transparent; border-radius:8px; min-width:80px; max-width:220px; }}
 QTabBar#doctabs::tab:hover {{ background:{t['hover']}; color:{t['text']}; }}
-QTabBar#doctabs::tab:selected {{ background:{t['surface']}; color:{t['text']}; font-weight:600; }}
+QTabBar#doctabs::tab:selected {{ background:{t['surface2']}; color:{t['text']}; border-color:{t['border']};
+    font-weight:600; }}
 QTabBar::close-button {{ image:url("{close}"); subcontrol-position:right; margin-left:6px;
     width:14px; height:14px; border-radius:4px; }}
 QTabBar::close-button:hover {{ image:url("{close_hover}"); background:{t['hover']}; }}
@@ -290,6 +290,59 @@ QMenu::item:selected {{ background:{t['accent_soft']}; color:{t['text']}; }}
 QMenu::item:disabled {{ color:{t['text_faint']}; }}
 QMenu::icon {{ padding-left:8px; }}
 QMenu::separator {{ height:1px; background:{t['border']}; margin:5px 6px; }}
+
+/* ---- yeni yerleşim ------------------------------------------------------ */
+#topbar {{ background:{t['surface']}; border-bottom:1px solid {t['border']}; }}
+QToolButton#menuBtn {{ color:{t['text_muted']}; padding:6px 9px; border-radius:7px; }}
+QToolButton#menuBtn:hover, QToolButton#menuBtn:pressed {{ color:{t['text']}; background:{t['hover']}; }}
+QToolButton#secondaryTb {{ background:{t['surface2']}; border:1px solid {t['border_strong']};
+    padding:6px 12px; }}
+QToolButton#secondaryTb:hover {{ background:{t['hover']}; }}
+QToolButton#secondaryTb:disabled {{ border-color:{t['border']}; }}
+#statusbar {{ background:{t['surface']}; border-top:1px solid {t['border']}; }}
+#status {{ background:transparent; }}
+QLineEdit#pageEdit {{ padding:3px 4px; border-radius:6px; }}
+#pageTotal {{ color:{t['text_muted']}; padding:0 6px 0 6px; }}
+QToolButton#zoomBtn {{ color:{t['text_muted']}; min-width:46px; padding:5px 6px; }}
+QToolButton#iconbtn {{ padding:6px; }}
+QToolButton#iconbtn:checked {{ background:{t['accent_soft']}; }}
+
+#sideRail {{ background:{t['surface']}; border-right:1px solid {t['border']}; }}
+QToolButton#railBtn {{ background:transparent; border:none; border-radius:10px; padding:0; }}
+QToolButton#railBtn:hover {{ background:{t['hover']}; }}
+QToolButton#railBtn:checked {{ background:{t['accent_soft']}; }}
+#sidePanel {{ background:{t['surface']}; border-right:1px solid {t['border']}; }}
+#panelTitle {{ color:{t['text']}; font-size:13px; font-weight:600; padding:14px 14px 8px 14px; }}
+#panelBody {{ background:{t['surface']}; }}
+#workspace, #compareWrap {{ background:{t['canvas']}; }}
+
+#capsule {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:14px; }}
+#propBar {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:12px; }}
+#miniBar {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px; }}
+#barSep {{ background:{t['border_strong']}; }}
+QToolButton#barBtn {{ background:transparent; border:none; border-radius:8px; padding:0; }}
+QToolButton#barBtn:hover {{ background:{t['hover']}; }}
+QToolButton#barBtn:pressed {{ background:{t['pressed']}; }}
+QPushButton#segBtn {{ background:{t['surface2']}; border:1px solid {t['border']}; border-radius:7px;
+    padding:4px 10px; }}
+QPushButton#segBtn:checked {{ background:{t['accent_soft']}; border-color:{t['accent']}; color:{t['accent_text']}; }}
+#valueLbl {{ color:{t['text_muted']}; }}
+#propPage QLabel {{ color:{t['text_muted']}; }}
+#propPage QLabel#propTitle {{ color:{t['text']}; font-size:13px; font-weight:600; }}
+
+#welcome {{ background:{t['bg']}; }}
+#welcomeTitle {{ color:{t['text']}; font-size:24px; font-weight:600; }}
+#welcomeSub {{ color:{t['text_muted']}; font-size:14px; }}
+#dropZone {{ background:{t['surface']}; border:2px dashed {t['border_strong']}; border-radius:16px; }}
+#dropHint {{ color:{t['text']}; font-size:15px; font-weight:600; }}
+#dropFormats {{ color:{t['text_faint']}; font-size:12px; }}
+QPushButton#recentItem {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;
+    padding:0; text-align:left; }}
+QPushButton#recentItem:hover {{ background:{t['hover']}; border-color:{t['accent']}; }}
+#recentName {{ color:{t['text']}; font-weight:600; }}
+#recentFolder {{ color:{t['text_faint']}; font-size:11px; }}
+#dropOverlay {{ background:{t['accent_soft']}; border:3px dashed {t['accent']}; border-radius:18px;
+    color:{t['accent_text']}; font-size:22px; font-weight:600; }}
 
 /* ---- kaydırma çubukları (ince, modern) -------------------------------- */
 QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}

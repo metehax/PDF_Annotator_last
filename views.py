@@ -124,6 +124,7 @@ class PDFView(QGraphicsView):
     contextMenuRequested = Signal(object, object)
     selectionAnnotationChanged = Signal(object)      # seçili Annotation | None
     currentPageChanged = Signal(int)                 # kaydırma / tıklama ile
+    hoveredPageChanged = Signal(int)                 # imlecin üstünde olduğu sayfa (-1: yok)
     zoomChanged = Signal(float)
 
     # Tüm konum sinyalleri (textRequested, numberRequested, …) SAYFA
@@ -160,6 +161,8 @@ class PDFView(QGraphicsView):
         self._tops: List[float] = []
         self._layout_sig = None
         self._current = 0
+        self._hover_idx = -1
+        self.setMouseTracking(True)
         self._programmatic_scroll = False
         self._zoom = 1.0
         self._gizmo_target: Optional[Annotation] = None
@@ -325,6 +328,11 @@ class PDFView(QGraphicsView):
 
     def set_canvas_color(self, color: QColor) -> None:
         self.setBackgroundBrush(color)
+        # viewport kenar boşlukları (üstteki araç kapsülü alanı) da aynı renkte olsun
+        pal = self.palette()
+        pal.setColor(self.backgroundRole(), color)
+        self.setPalette(pal)
+        self.setAutoFillBackground(True)
 
     def page_rect_in_scene(self, index: int) -> QRectF:
         p = self._pages[index]
@@ -813,6 +821,11 @@ class PDFView(QGraphicsView):
             return
 
         if not self._drawing or self._active_page is None:
+            page = self._page_at(self.mapToScene(e.position().toPoint()))
+            idx = page.index if page is not None else -1
+            if idx != self._hover_idx:
+                self._hover_idx = idx
+                self.hoveredPageChanged.emit(idx)
             super().mouseMoveEvent(e)
             return
 
@@ -963,6 +976,12 @@ class PDFView(QGraphicsView):
                 self._restore_tool_cursor()
             return
         super().keyReleaseEvent(e)
+
+    def leaveEvent(self, e):
+        if self._hover_idx != -1:
+            self._hover_idx = -1
+            self.hoveredPageChanged.emit(-1)
+        super().leaveEvent(e)
 
     def focusOutEvent(self, e):
         if self._space_down:

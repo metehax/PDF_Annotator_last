@@ -33,6 +33,9 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `views.py`       | `PDFView` (canvas etkileşimleri, **Bézier/Catmull-Rom ink yumuşatma**, arama vurguları), `ComparePane` (karşılaştırma modu) |
 | `ui/theme.py`    | Renk sistemi (açık/koyu tema belirteçleri), QPalette + stil dosyası, Windows temasını izleme |
 | `ui/icons.py`    | Uygulamanın kendi SVG ikon seti; renk temadan ve düğme durumundan çizim anında seçilir |
+| `ui/overlays.py` | Çalışma alanında yüzen gölgeli çubuklar (araç kapsülü, özellik/seçim/sayfa çubukları) |
+| `ui/sidepanel.py`| Sol ikon şeridi + animasyonla açılıp kapanan panel |
+| `ui/welcome.py`  | Açılış ekranı: sürükle-bırak alanı, son açılan dosyalar |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
 
@@ -133,3 +136,20 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   PNG/JPEG/BMP/TIFF/WEBP çıktı. Çok sayfalı belgelerde her sayfa ayrı dosya olur.
 * İstenirse resim **PDF olarak** da kaydedilebilir; **Birleştir** resimleri de
   kabul eder.
+
+## Yeni: Arayüz yerleşimi
+
+* **Üst çubuk:** Dosya / Düzenle / Görünüm / Belge / Yardım menüleri, ortada
+  belge sekmeleri, sağda Geri al/Yinele, Dışa Aktar ve Kaydet.
+* **Araç kapsülü:** Sayfanın üstünde yüzen araç çubuğu. Seçilen aracın
+  ayarları hemen altındaki **özellik çubuğunda** çıkar (ipuçları (i) simgesinde).
+* **Sol şerit:** Sayfalar, İçindekiler, Ara ve İşaretler panelleri; aynı simgeye
+  tekrar tıklamak paneli kapatır (Ctrl+B).
+* **Seçim çubuğu:** Seçili işaretin üstünde: öne/arkaya al, sil.
+  **Sayfa çubuğu:** Seç aracındayken imlecin altındaki sayfanın sağ üstünde:
+  döndür, sayfa ekle/kopyala/sil. Sayfaya sağ tıklamak da aynı menüyü açar.
+* **Durum çubuğu:** Sayfa numarası kutusu (yazıp Enter), sığdırma, zoom
+  (yüzdeye tıklayınca hazır değerler), gece modu, karşılaştırma.
+* **Açılış ekranı ve sürükle-bırak:** Dosyaları pencereye bırakmak yeterli;
+  son açılanlar hem açılış ekranında hem Dosya menüsünde listelenir.
+* Klavye kısayollarının tamamı: Yardım → Klavye kısayolları (F1).
