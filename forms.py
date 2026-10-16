@@ -27,10 +27,11 @@ FIELD_KINDS = [
     ("combo", "Açılır liste"),
     ("date", "Tarih"),
     ("calc", "Hesaplanan alan"),
+    ("signature", "İmza alanı"),
 ]
 KIND_NAMES = dict(FIELD_KINDS)
 KIND_BASE = {"text": "Metin", "checkbox": "Onay", "radio": "Secim", "combo": "Liste",
-             "date": "Tarih", "calc": "Toplam"}
+             "date": "Tarih", "calc": "Toplam", "signature": "Imza"}
 
 CALC_OPS = [("SUM", "Toplam (+)"), ("PRD", "Çarpım (×)"), ("AVG", "Ortalama"),
             ("MIN", "En küçük"), ("MAX", "En büyük")]
@@ -38,7 +39,7 @@ DATE_FORMATS = ["dd.mm.yyyy", "dd/mm/yyyy", "yyyy-mm-dd", "dd.mm.yy"]
 
 # çizim sırasında tıklanıp bırakılan küçük alanlar için varsayılan boyutlar (pt)
 DEFAULT_SIZE = {"text": (160, 22), "checkbox": (14, 14), "radio": (14, 14), "combo": (140, 22),
-                "date": (100, 22), "calc": (100, 22)}
+                "date": (100, 22), "calc": (100, 22), "signature": (180, 50)}
 
 _CALC_RE = re.compile(r'AFSimple_Calculate\(\s*"(\w+)"\s*,\s*new\s+Array\s*\((.*?)\)\s*\)', re.S)
 _DATE_RE = re.compile(r'AFDate_(?:Format|Keystroke)Ex\(\s*"([^"]+)"')
@@ -114,6 +115,8 @@ def _kind_of(w) -> str:
         return "radio"
     if ft in (fitz.PDF_WIDGET_TYPE_COMBOBOX, fitz.PDF_WIDGET_TYPE_LISTBOX):
         return "combo"
+    if ft == fitz.PDF_WIDGET_TYPE_SIGNATURE:
+        return "signature"
     if ft == fitz.PDF_WIDGET_TYPE_TEXT:
         if w.script_calc and _CALC_RE.search(w.script_calc):
             return "calc"
@@ -513,6 +516,9 @@ def add_field(doc: "fitz.Document", pidx: int, spec: dict) -> str:
         opts = [o for o in spec.get("options") or [] if o] or ["Seçenek 1"]
         w.choice_values = opts
         w.field_value = ""
+    elif kind == "signature":            # boş imza alanı; dijital imzayla doldurulur
+        w.field_type = fitz.PDF_WIDGET_TYPE_SIGNATURE
+        w.fill_color = (1.0, 0.98, 0.9)
     else:
         w.field_type = fitz.PDF_WIDGET_TYPE_TEXT
         w.field_value = ""

@@ -87,6 +87,7 @@ _PATHS: Dict[str, str] = {
     "highlight": '<path d="m14 4 6 6-8.5 8.5H8.5v-3z"/><path d="M8.5 18.5 6 21H3"/><path d="m11 7 6 6"/>',
     "redact": '<rect x="3" y="5" width="18" height="14" rx="2"/><rect x="6.5" y="9.5" width="11" height="5" rx="1" fill="currentColor"/>',
     "number": '<circle cx="12" cy="12" r="9"/><path d="M10.5 9 12.5 7.5v9"/>',
+    "sign": '<path d="M3 17c3-1 4-9 6-9s-1 9 1 9 3-5 5-5 1 4 3 4 2-1 3-2"/><path d="M3 21h18"/>',
     "stamp": '<path d="M5 21h14"/><path d="M4 17.5v-2A2.5 2.5 0 0 1 6.5 13h11a2.5 2.5 0 0 1 2.5 2.5v2a.5.5 0 0 1-.5.5h-15a.5.5 0 0 1-.5-.5z"/><path d="M14 13V9.5c0-1.5 1.5-2 1.5-4a3.5 3.5 0 0 0-7 0c0 2 1.5 2.5 1.5 4V13"/>',
     "privacy": '<path d="M12 3 4.5 6v5.5c0 4.6 3.2 8.4 7.5 9.5 4.3-1.1 7.5-4.9 7.5-9.5V6z"/><path d="M9.5 11.5h5v4h-5z"/><path d="M10.5 11.5V10a1.5 1.5 0 0 1 3 0v1.5"/>',
     "eye": '<path d="M2 12s3.6-7 10-7 10 7 10 7-3.6 7-10 7S2 12 2 12z"/><circle cx="12" cy="12" r="3"/>',

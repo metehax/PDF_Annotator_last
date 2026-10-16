@@ -23,7 +23,7 @@ from PySide6.QtCore import (
     QEvent, QObject, QPoint, QPointF, QRectF, QRunnable, QSettings, QSize, Qt, QThreadPool, QTimer,
     QUrl, Signal,
 )
-from PySide6.QtGui import (
+from PySide6.QtGui import (QPainter, 
     QAction, QColor, QDesktopServices, QFont, QImage, QIntValidator, QKeySequence, QPixmap, QShortcut,
     QUndoGroup,
 )
@@ -66,6 +66,7 @@ from ui.formui import FormFieldDialog, FormFieldEditor, FormsPanel
 from ui.kvkk import KvkkDialog
 from ui.pagetools import CropPagesDialog, HeadFootDialog
 from ui.palette import Command, CommandPalette
+from ui.signatures import DigitalSignDialog, ReportDialog, SignatureDialog, SignatureLibrary, report_html
 from ui.stamps import SCALE as STAMP_SCALE, StampLibrary, StampLibraryDialog, image_png_bytes, \
     preview_icon, render_stamp, today
 from ui.toast import ToastManager
@@ -98,6 +99,7 @@ TOOLS = [
     ("image", "Resim", "image", "Sayfaya resim yerleştir"),
     ("number", "Numarala", "number", "Sıra numarası koy"),
     ("stamp", "Damga", "stamp", "Hazır ya da kendi damganızı basın"),
+    ("sign", "İmza", "sign", "Kayıtlı elektronik imzanızı tek tıkla basın"),
     ("note", "Yapışkan Not", "note", "Sayfaya not ekle; Yorumlar panelinde görünür"),
     ("crop", "Kırp / Yakala", "crop", "Bir alanı görsel olarak yakala"),
     ("form", "Form Alanı", "form", "Doldurulabilir form alanı oluştur (metin, onay, liste, tarih…)"),
@@ -106,7 +108,7 @@ TOOL_NAMES = {t[0]: t[1] for t in TOOLS if t}
 # Tek harfli araç kısayolları (yazı yazılan alanlarda devreye girmez)
 TOOL_KEYS = {"select": "V", "text": "T", "edit": "E", "ink": "P", "highlight": "H", "line": "L",
              "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "stamp": "S", "crop": "C",
-             "blur": "B", "note": "M", "form": "F"}
+             "blur": "B", "note": "M", "form": "F", "sign": "G"}
 APP_ID = "PDFAnnotator.Belge"
 
 
@@ -612,6 +614,7 @@ class MainWindow(QMainWindow):
         self._pending_search_tasks = []
 
         self.stamp_lib = StampLibrary(self.settings)
+        self.sig_lib = SignatureLibrary(self.settings)
         self._build_ui()
         self._apply_style()
         geo = self.settings.value("geometry")
@@ -923,6 +926,14 @@ class MainWindow(QMainWindow):
         A(m_form, "reset", "Formu sıfırla", self.reset_form)
         A(m_form, "calc", "Alanları yeniden hesapla", self.recalculate_form)
 
+        m_sign = QMenu("İmza", self)
+        A(m_sign, "sign", "İmza bas (araç)", lambda: self._tool_shortcut("sign"))
+        A(m_sign, "plus", "Yeni elektronik imza…", self.new_signature, needs_doc=False)
+        A(m_sign, "form", "İmza alanı oluştur", self.start_signature_field)
+        m_sign.addSeparator()
+        A(m_sign, "lock", "Dijital olarak imzala (.pfx)…", self.sign_digitally)
+        A(m_sign, "shield", "İmzaları doğrula…", self.verify_signatures)
+
         m_help = QMenu("Yardım", self)
         A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
         m_help.addSeparator()
@@ -956,7 +967,7 @@ class MainWindow(QMainWindow):
             icon_name, text, slot = entry
             self.export_menu.addAction(icon(icon_name), text, slot)
         self._menus = [("Dosya", m_file), ("Düzenle", m_edit), ("Görünüm", m_view),
-                       ("Belge", m_doc), ("Form", m_form), ("Yardım", m_help)]
+                       ("Belge", m_doc), ("Form", m_form), ("İmza", m_sign), ("Yardım", m_help)]
         return self._menus
 
     # -- üst çubuk ----------------------------------------------------------
@@ -1131,6 +1142,7 @@ class MainWindow(QMainWindow):
         self.view.textRequested.connect(self.on_text_requested)
         self.view.numberRequested.connect(self.on_number_requested)
         self.view.stampRequested.connect(self.on_stamp_requested)
+        self.view.signRequested.connect(self.on_sign_requested)
         self.view.noteRequested.connect(self.on_note_requested)
         self.view.noteEditRequested.connect(self.edit_note)
         self.view.editTextRequested.connect(self.on_edit_text_requested)
@@ -1548,6 +1560,29 @@ class MainWindow(QMainWindow):
         ))
         self._tool_pages["stamp"] = idx; idx += 1
 
+        self.sig_combo = QComboBox()
+        self.sig_combo.setIconSize(QSize(110, 32))
+        self.sig_combo.setMinimumWidth(150)
+        self.sig_combo.setToolTip("Basılacak imza")
+        btn_sig_new = QPushButton(icon("plus"), "Yeni imza…")
+        btn_sig_new.clicked.connect(self.new_signature)
+        btn_sig_del = QPushButton(icon("trash"), "")
+        btn_sig_del.setToolTip("Seçili imzayı kütüphaneden sil")
+        btn_sig_del.clicked.connect(self.delete_signature)
+        self.chk_sig_date = QCheckBox("Tarih ekle")
+        self.chk_sig_date.setChecked(str(self.settings.value("signDate", "false")).lower() == "true")
+        self.chk_sig_date.toggled.connect(lambda v: self.settings.setValue("signDate", bool(v)))
+        self._fill_sig_combo()
+        self.sig_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("signId", self.sig_combo.currentData() or ""))
+        self.prop_stack.addWidget(page(
+            self.sig_combo, btn_sig_new, btn_sig_del, self.chk_sig_date,
+            self._hint("İmzanızı bir kez çizin, yazın ya da görselden alın; sonra sayfada imzanın "
+                      "ortalanacağı yere tıklayın. Bu görsel (elektronik) imzadır; hukuki geçerli "
+                      "dijital imza için İmza › Dijital olarak imzala."),
+        ))
+        self._tool_pages["sign"] = idx; idx += 1
+
         self.prop_stack.addWidget(page(
             self._hint("Bir alan sürükleyip bırakın; açılan pencereden PNG "
                       "olarak kaydedebilir ya da panoya kopyalayabilirsiniz.\n\n"
@@ -1565,9 +1600,10 @@ class MainWindow(QMainWindow):
         ))
         self._tool_pages["note"] = idx; idx += 1
 
+        self._form_kind_row = self._combo_row("Alan türü", [(t, k) for k, t in forms.FIELD_KINDS],
+                                              lambda v: setattr(self.state, "form_kind", v))
         self.prop_stack.addWidget(page(
-            self._combo_row("Alan türü", [(t, k) for k, t in forms.FIELD_KINDS],
-                            lambda v: setattr(self.state, "form_kind", v)),
+            self._form_kind_row,
             self._checkbox_row("Özellikleri sor", "form_ask",
                                "Kapalıysa alan varsayılan adla hemen oluşturulur"),
             self._hint("Sayfada bir kutu çizin (onay/radyo için tıklamak yeter). Mevcut bir alana "
@@ -2721,6 +2757,8 @@ class MainWindow(QMainWindow):
         elif f.kind == "calc":
             self.toasts.show(f"'{f.name}' hesaplanan bir alan: {f.value or 'boş'} "
                              f"({dict(forms.CALC_OPS).get(f.calc_op, '')}: {', '.join(f.calc_sources)})")
+        elif f.kind == "signature":
+            self.toasts.show(f"'{f.name}' bir imza alanı: Araçlar › Dijital imza ile imzalayın.")
         elif f.kind == "other" or f.readonly:
             self.toasts.show(f"'{f.name}' alanı bu uygulamada düzenlenemez.")
         else:
@@ -3463,6 +3501,154 @@ class MainWindow(QMainWindow):
                                                label="Damga"))
         self.status.setText(f"'{st.text}' damgası basıldı. Taşımak için Seç aracını (V) kullanın.")
 
+    # -- elektronik ve dijital imza ---------------------------------------------
+    def _fill_sig_combo(self, select_id=None):
+        select_id = select_id or self.settings.value("signId", "")
+        self.sig_combo.blockSignals(True)
+        self.sig_combo.clear()
+        for it in self.sig_lib.items:
+            self.sig_combo.addItem(SignatureLibrary.icon(it), "", it["id"])
+            if it["id"] == select_id:
+                self.sig_combo.setCurrentIndex(self.sig_combo.count() - 1)
+        if not self.sig_lib.items:
+            self.sig_combo.addItem("(imza yok)", None)
+        self.sig_combo.blockSignals(False)
+
+    def ask_signature(self):
+        """Yeni imza penceresi; (png, etiket) ya da None. Testte sahtelenir."""
+        dlg = SignatureDialog(self, str(self.settings.value("author", "") or ""))
+        if dlg.exec() != QDialog.DialogCode.Accepted or not dlg.result_png:
+            return None
+        return dlg.result_png, dlg.result_label
+
+    def new_signature(self):
+        res = self.ask_signature()
+        if not res:
+            return
+        it = self.sig_lib.add(*res)
+        self.settings.setValue("signId", it["id"])
+        self._fill_sig_combo(it["id"])
+        if self.active_session:
+            self._tool_shortcut("sign")
+        self.toasts.show("İmza kaydedildi. Sayfada imzanın konacağı yere tıklayın.")
+
+    def delete_signature(self):
+        sid = self.sig_combo.currentData()
+        if sid:
+            self.sig_lib.remove(sid)
+            self._fill_sig_combo()
+
+    def on_sign_requested(self, pt: QPointF):
+        s = self.active_session
+        if not s:
+            return
+        item = next((i for i in self.sig_lib.items if i["id"] == self.sig_combo.currentData()), None)
+        if item is None:
+            self.new_signature()
+            return
+        img = QImage.fromData(SignatureLibrary.png(item))
+        if self.chk_sig_date.isChecked():
+            img = self._sig_with_date(img)
+        w = 150.0
+        h = w * img.height() / max(1, img.width())
+        if h > 70:
+            w, h = w * 70 / h, 70.0
+        pw, ph = s.pdf.page_size(s.current_page)
+        x = min(max(0.0, pt.x() - w / 2), max(0.0, pw - w))
+        y = min(max(0.0, pt.y() - h / 2), max(0.0, ph - h))
+        ann = ImageAnnotation(QRectF(x, y, w, h), image_png_bytes(img), 1.0, True, source_path="sign:")
+        s.undo_stack.push(AddAnnotationCommand(s, s.current_page, ann, on_change=self._on_session_change,
+                                               label="İmza"))
+        self.status.setText("İmza basıldı. Taşımak/boyutlandırmak için Seç aracını (V) kullanın.")
+
+    @staticmethod
+    def _sig_with_date(img: QImage) -> QImage:
+        fh = max(18, img.height() // 5)
+        out = QImage(img.width(), img.height() + fh + 6, QImage.Format.Format_ARGB32)
+        out.fill(Qt.GlobalColor.transparent)
+        p = QPainter(out)
+        p.drawImage(0, 0, img)
+        f = p.font(); f.setPixelSize(fh); p.setFont(f)
+        p.setPen(QColor(40, 40, 60))
+        p.drawText(QRectF(0, img.height() + 3, img.width(), fh + 2), Qt.AlignmentFlag.AlignLeft, today())
+        p.end()
+        return out
+
+    def start_signature_field(self):
+        self._tool_shortcut("form")
+        combo = self._form_kind_row.findChild(QComboBox)
+        combo.setCurrentIndex(combo.findData("signature"))
+        self.toasts.show("Sayfada imza alanının kutusunu çizin.")
+
+    def ask_digital_sign(self, sig_fields):
+        """İmzalama seçenekleri + çıktı yolu; dict ya da None. Testte sahtelenir."""
+        dlg = DigitalSignDialog(self, sig_fields, self.settings)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        default = os.path.splitext(self.active_session.path)[0] + "_imzali.pdf"
+        out, _ = QFileDialog.getSaveFileName(self, "İmzalı PDF'i kaydet", default, "PDF (*.pdf)")
+        if not out:
+            return None
+        v = dlg.values()
+        v["out"] = out if out.lower().endswith(".pdf") else out + ".pdf"
+        return v
+
+    def sign_digitally(self):
+        import tempfile
+        import digisign
+        s = self.active_session
+        if not s:
+            return
+        # Değişiklik yoksa özgün dosya artımlı imzalanır (önceki imzalar korunur)
+        pristine = (not s.pdf.is_image and not s.dirty and s.undo_stack.isClean()
+                    and not any(s.annotations.values()) and s.path.lower().endswith(".pdf")
+                    and not getattr(s, "security", None))
+        tmp = None
+        try:
+            if pristine:
+                src = s.path
+            else:
+                fd, tmp = tempfile.mkstemp(suffix=".pdf")
+                os.close(fd)
+                s.pdf.export_pdf(tmp, s.annotations, self.font_ctx)
+                src = tmp
+            v = self.ask_digital_sign(digisign.empty_signature_fields(src))
+            if not v:
+                return
+            box = None
+            if v["mode"] == "box":
+                pw, ph = s.pdf.page_size(s.current_page)
+                box = (s.current_page, (pw - 230, ph - 100, pw - 40, ph - 40))
+            who = digisign.sign_pdf(src, v["out"], v["pfx"], v["password"],
+                                    field=v["field"] if v["mode"] == "field" else None, new_box=box,
+                                    reason=v["reason"], location=v["location"])
+            self._toast_saved(f"{who} adına dijital olarak imzalandı", v["out"])
+        except Exception as ex:
+            QMessageBox.critical(self, "İmzalanamadı", str(ex))
+        finally:
+            if tmp and os.path.exists(tmp):
+                os.remove(tmp)
+
+    def show_report(self, title, html):
+        ReportDialog(self, title, html).exec()
+
+    def verify_signatures(self):
+        import digisign
+        s = self.active_session
+        if not s or s.pdf.is_image:
+            return
+        try:
+            reps = digisign.verify_pdf(s.path)
+        except Exception as ex:
+            QMessageBox.critical(self, "Doğrulanamadı", str(ex))
+            return
+        html = report_html(reps)
+        if s.dirty or not s.undo_stack.isClean():
+            html = ("<p style='color:#b26a00'>Not: Doğrulama diskteki dosyaya yapılır; açık belgedeki "
+                    "kaydedilmemiş değişiklikler dahil değildir.</p>") + html
+        self._last_sig_reports = reps
+        self.show_report("İmza doğrulama", html)
+
     # -- belge güvenliği ve bilgileri ------------------------------------------
     def save_compressed(self):
         s = self.active_session
@@ -3872,6 +4058,8 @@ class MainWindow(QMainWindow):
             src = ann.source_path or ""
             if src.startswith("stamp:"):
                 return "stamp", f"Damga: {src[6:]}"
+            if src.startswith("sign:"):
+                return "sign", "İmza"
             return "image", "Resim"
         return "layers", "Öge"
 

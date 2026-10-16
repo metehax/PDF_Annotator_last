@@ -47,6 +47,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/comments.py` | Yorumlar paneli (yapışkan notlar, yanıtlar, çözüldü) |
 | `forms.py`       | PDF formları (AcroForm): alanları okuma, doldurma, sıfırlama, hesaplama, alan oluşturma/silme |
 | `ui/formui.py`   | Formlar paneli, alan özellikleri penceresi, sayfa üstündeki alan düzenleyicisi |
+| `ui/signatures.py` | Elektronik imza (çiz/yaz/görsel), imza kütüphanesi, dijital imza ve doğrulama pencereleri |
+| `digisign.py`    | Dijital imza (pyhanko): .pfx ile imzalama, doğrulama, sonradan değişiklik denetimi |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
@@ -171,7 +173,7 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 * **Ctrl+K komut paleti:** Yazarak her komuta ulaşın ("döndür", "filigran",
   "ocr", "kalem", "sayfa 12"…). Türkçe karakter yazmanız gerekmez.
 * **Tek harfli araç kısayolları:** V Seç, T Metin, E Metin Düzenle, P Kalem,
-  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, B Bulanıklaştır, I Resim, N Numarala, S Damga, M Not, C Kırp/Yakala, F Form Alanı.
+  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, B Bulanıklaştır, I Resim, N Numarala, S Damga, M Not, G İmza, C Kırp/Yakala, F Form Alanı.
   Esc seç aracına döner. Yazı alanlarındayken devreye girmez.
 * **Bildirimler:** Kaydetme vb. sonuçlar köşede kısa bir bildirimle gösterilir
   ("Klasörde göster" bağlantısıyla). Hatalar yine pencere olarak çıkar.
@@ -263,3 +265,19 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 * Sınırlamalar: imza ve düğme alanları listelenir ama düzenlenmez; çok satırlı alanlarda
   Türkçe karakterli metin basit sözcük kaydırmayla çizilir; proje (JSON) dosyası form
   değerlerini taşımaz — değerler PDF olarak kaydedilince korunur.
+
+## Yeni: Elektronik ve dijital imza
+
+* **Elektronik imza — İmza aracı (G):** "Yeni imza…" ile imzanızı fareyle **çizin**, adınızı el
+  yazısı yazı tipiyle **yazın** ya da taranmış **görselden** alın (beyaz arka plan saydamlaştırılır).
+  İmzalar kaydedilir; sonra sayfada tıkladığınız yere tek tıkla basılır ("Tarih ekle" isteğe bağlı).
+  Bu görsel bir imzadır; Seç aracıyla taşınıp boyutlandırılabilir.
+* **İmza alanı oluştur** (İmza menüsü ya da Form Alanı aracında "İmza alanı"): başkalarının
+  dijital imzalaması için boş imza kutusu ekler.
+* **Dijital olarak imzala (.pfx/.p12):** sertifika + parola, yer (boş imza alanı, görünür kutu ya da
+  görünmez), neden ve konum seçilir; imzalı kopya ayrı dosyaya yazılır. Değişiklik yapılmamış
+  PDF artımlı imzalanır, önceki imzalar bozulmaz. Deneme için "Oluştur…" kendinden imzalı
+  sertifika üretir.
+* **İmzaları doğrula:** her imza için imzalayan, zaman, bütünlük, kriptografik geçerlilik,
+  sertifika güveni ve **imzadan sonra değişiklik** (yok / form / açıklama / içerik) raporlanır.
+  Not: imzalı bir belgeyi işaretleyip yeniden kaydetmek mevcut imzaları geçersiz kılar.
