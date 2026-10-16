@@ -36,7 +36,7 @@ from PySide6.QtGui import QImage, QPainter, QPixmap
 from PySide6.QtSvg import QSvgRenderer
 
 from models import (
-    Annotation, RedactionAnnotation, WatermarkConfig, qcolor_to_fitz,
+    Annotation, BlurAnnotation, RedactionAnnotation, WatermarkConfig, qcolor_to_fitz,
 )
 
 LRU_CACHE_SIZE = 10          # Render önbelleğinde tutulacak azami sayfa sayısı
@@ -497,6 +497,46 @@ class PDFDocument:
         self._invalidate_page(index)
         self.layout_rev += 1
 
+    # -- sayfa kırpma ----------------------------------------------------------
+    def crop_page(self, index: int, vis: "fitz.Rect") -> "fitz.Rect":
+        """Sayfayı GÖRÜNEN (döndürülmüş, şu anki kırpma kutusuna göre) koordinattaki
+        `vis` alanına kırpar. Eski kırpma kutusunu döndürür (geri almak için)."""
+        with self.lock:
+            page = self.doc[index]
+            old = fitz.Rect(page.cropbox)
+            un = fitz.Rect(vis) * page.derotation_matrix
+            un.normalize()
+            pos = page.cropbox_position
+            un = fitz.Rect(un.x0 + pos.x, un.y0 + pos.y, un.x1 + pos.x, un.y1 + pos.y)
+            un &= page.mediabox
+            if un.is_empty or un.width < 4 or un.height < 4:
+                raise ValueError("Kırpma alanı çok küçük.")
+            page.set_cropbox(un)
+        self._invalidate_page(index)
+        self.layout_rev += 1
+        return old
+
+    def restore_cropbox(self, index: int, old: "fitz.Rect") -> None:
+        with self.lock:
+            self.doc[index].set_cropbox(old)
+        self._invalidate_page(index)
+        self.layout_rev += 1
+
+    def content_bbox(self, index: int, margin: float = 6.0) -> Optional["fitz.Rect"]:
+        """Sayfadaki beyaz olmayan içeriğin sınırı (görünen koordinat); boşsa None."""
+        from PIL import Image, ImageChops
+        z = 0.5
+        with self.lock:
+            pix = self.doc[index].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
+            page_rect = self.doc[index].rect
+        im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
+        bg = Image.new("RGB", im.size, (255, 255, 255))
+        box = ImageChops.difference(im, bg).convert("L").point(lambda v: 255 if v > 12 else 0).getbbox()
+        if not box:
+            return None
+        r = fitz.Rect(box[0] / z - margin, box[1] / z - margin, box[2] / z + margin, box[3] / z + margin)
+        return r & page_rect
+
     # -- kaynak temizliği ----------------------------------------------------
     def close(self):
         """Dosya kilitlenmelerini önlemek için PyMuPDF belgesini açıkça
@@ -525,20 +565,34 @@ class PDFDocument:
                 continue
             page = tmp[pidx]
             redactions = [a for a in anns if isinstance(a, RedactionAnnotation)]
-            others = [a for a in anns if not isinstance(a, RedactionAnnotation)]
+            blurs = [a for a in anns if isinstance(a, BlurAnnotation)]
+            others = [a for a in anns if not isinstance(a, (RedactionAnnotation, BlurAnnotation))]
             for r in redactions:
                 r.apply_to_page(page, font_ctx)
             if redactions:
                 page.apply_redactions()
+            if blurs:
+                # önce hepsinin bulanık görüntüsü hazırlanır, sonra alttaki içerik silinir
+                for b in blurs:
+                    b.prepare(page)
+                for b in blurs:
+                    page.add_redact_annot(b.erase_rect(), fill=False)
+                page.apply_redactions()
+                for b in blurs:
+                    b.apply_to_page(page, font_ctx)
             for a in others:
                 a.apply_to_page(page, font_ctx)
         return tmp
 
     def export_pdf(self, out_path: str, annotations_by_page, font_ctx,
                     watermark: Optional[WatermarkConfig] = None, security=None,
-                    compress: Optional[str] = None) -> None:
-        """security: docsec.SecurityOptions (parola/izinler), compress: docsec seviye anahtarı."""
+                    compress: Optional[str] = None, headfoot=None, source_name: str = "") -> None:
+        """security: docsec.SecurityOptions (parola/izinler), compress: docsec seviye anahtarı,
+        headfoot: headfoot.HeadFootConfig (sayfa numarası / üstbilgi / altbilgi / Bates)."""
         tmp = self._annotated_copy(annotations_by_page, font_ctx)
+        if headfoot is not None:
+            from headfoot import apply_header_footer
+            apply_header_footer(tmp, headfoot, font_ctx, source_name)
         if watermark is not None:
             current_index = 0
             pages = (list(range(tmp.page_count)) if watermark.scope != "current"

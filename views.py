@@ -42,8 +42,8 @@ from gizmo import SelectionGizmo
 from ui import theme as ui_theme
 from ui.icons import icon
 from models import (
-    Annotation, HighlightAnnotation, ImageAnnotation, InkAnnotation,
-    LineAnnotation, RedactionAnnotation, ShapeAnnotation,
+    Annotation, BlurAnnotation, HighlightAnnotation, ImageAnnotation, InkAnnotation,
+    LineAnnotation, NoteAnnotation, RedactionAnnotation, ShapeAnnotation,
     ToolState, arrow_wing_points, catmull_rom_to_beziers,
 )
 
@@ -126,6 +126,8 @@ class PDFView(QGraphicsView):
     currentPageChanged = Signal(int)                 # kaydırma / tıklama ile
     hoveredPageChanged = Signal(int)                 # imlecin üstünde olduğu sayfa (-1: yok)
     stampRequested = Signal(QPointF)                 # damga aracıyla tıklandı
+    noteRequested = Signal(QPointF)                  # not aracıyla tıklandı
+    noteEditRequested = Signal(object)               # bir nota çift tıklandı (NoteAnnotation)
     zoomChanged = Signal(float)
 
     # Tüm konum sinyalleri (textRequested, numberRequested, …) SAYFA
@@ -723,6 +725,11 @@ class PDFView(QGraphicsView):
                 self.stampRequested.emit(pt)
             return
 
+        if tool == "note":
+            if e.button() == Qt.MouseButton.LeftButton:
+                self.noteRequested.emit(pt)
+            return
+
         if tool == "edit":
             if e.button() == Qt.MouseButton.LeftButton:
                 self.editTextRequested.emit(pt)
@@ -762,6 +769,13 @@ class PDFView(QGraphicsView):
             item = QGraphicsRectItem()
             item.setBrush(QBrush(QColor(self.state.redact_color)))
             item.setPen(QPen(QColor("#ff4d4d"), 1.5, Qt.PenStyle.DashLine))
+            self._add_temp(item)
+
+        elif tool == "blur":
+            item = QGraphicsRectItem()
+            fc = QColor("#3a86ff"); fc.setAlphaF(0.22)
+            item.setBrush(QBrush(fc, Qt.BrushStyle.BDiagPattern))
+            item.setPen(QPen(QColor("#3a86ff"), 1.5, Qt.PenStyle.DashLine))
             self._add_temp(item)
 
         elif tool == "crop":
@@ -863,7 +877,7 @@ class PDFView(QGraphicsView):
                 path.moveTo(end); path.lineTo(*w2)
             self._temp_item.setPath(path)
 
-        elif tool in ("rect", "oval", "redact", "crop", "image"):
+        elif tool in ("rect", "oval", "redact", "blur", "crop", "image"):
             self._temp_item.setRect(QRectF(self._start, pt).normalized())
 
         elif tool == "highlight":
@@ -911,6 +925,10 @@ class PDFView(QGraphicsView):
             rect = QRectF(self._start, pt).normalized()
             if rect.width() > 2 and rect.height() > 2:
                 ann = RedactionAnnotation(rect, self.state.redact_color)
+        elif tool == "blur":
+            rect = QRectF(self._start, pt).normalized()
+            if rect.width() > 4 and rect.height() > 4:
+                ann = BlurAnnotation(rect, self.state.blur_strength, self.state.blur_mode)
         elif tool == "crop":
             rect = QRectF(self._start, pt).normalized()
             self._clear_temp()
@@ -941,6 +959,17 @@ class PDFView(QGraphicsView):
         if ann is not None:
             self.annotationCreated.emit(ann)
 
+    def mouseDoubleClickEvent(self, e):
+        if self.state.tool == "select" and e.button() == Qt.MouseButton.LeftButton:
+            gi = self.itemAt(e.position().toPoint())
+            while gi is not None and gi not in self.item_ann_map:
+                gi = gi.parentItem()
+            ann = self.item_ann_map.get(gi) if gi is not None else None
+            if isinstance(ann, NoteAnnotation):
+                self.noteEditRequested.emit(ann)
+                return
+        super().mouseDoubleClickEvent(e)
+
     def _clear_temp(self):
         if self._temp_item is not None:
             if self._temp_item.scene() is not None:
@@ -949,7 +978,7 @@ class PDFView(QGraphicsView):
 
     def _restore_tool_cursor(self):
         tool = self.state.tool
-        cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number")
+        cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number", "note")
                   else Qt.CursorShape.CrossCursor if tool != "select"
                   else Qt.CursorShape.ArrowCursor)
         self.viewport().setCursor(cursor)

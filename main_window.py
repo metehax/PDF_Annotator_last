@@ -39,9 +39,9 @@ from PySide6.QtWidgets import (
 )
 
 from models import (
-    AddAnnotationCommand, DocumentSession, HighlightAnnotation,
-    ImageAnnotation, InkAnnotation, LineAnnotation, MoveAnnotationCommand,
-    NumberAnnotation, RedactionAnnotation, RemoveAnnotationCommand,
+    AddAnnotationCommand, BlurAnnotation, CropPagesCommand, DocumentSession, HighlightAnnotation,
+    ImageAnnotation, InkAnnotation, LineAnnotation, MoveAnnotationCommand, NoteAnnotation,
+    NoteStateCommand, NumberAnnotation, RedactionAnnotation, RemoveAnnotationCommand,
     ResizeAnnotationCommand, ShapeAnnotation, TextAnnotation, ToolState,
     WatermarkConfig, ZOrderCommand, number_to_color,
 )
@@ -57,8 +57,11 @@ from ui import theme as ui_theme
 from ui.icons import icon, pixmap as icon_pixmap
 from ui.overlays import FloatingBar
 import docsec
+from headfoot import HeadFootConfig
 from ui.docdialogs import CompressDialog, DocInfoDialog, PasswordDialog, SecurityCheckDialog
+from ui.comments import CommentsPanel, ask_note_text
 from ui.kvkk import KvkkDialog
+from ui.pagetools import CropPagesDialog, HeadFootDialog
 from ui.palette import Command, CommandPalette
 from ui.stamps import SCALE as STAMP_SCALE, StampLibrary, StampLibraryDialog, image_png_bytes, \
     preview_icon, render_stamp, today
@@ -88,15 +91,18 @@ TOOLS = [
     ("oval", "Oval", "oval", "Oval çiz"),
     None,
     ("redact", "Gizle (Sansür)", "redact", "Altındaki içeriği kalıcı olarak sil"),
+    ("blur", "Bulanıklaştır", "blur", "Bir alanı bulanıklaştır ya da mozaikle (kalıcı)"),
     ("image", "Resim", "image", "Sayfaya resim yerleştir"),
     ("number", "Numarala", "number", "Sıra numarası koy"),
     ("stamp", "Damga", "stamp", "Hazır ya da kendi damganızı basın"),
+    ("note", "Yapışkan Not", "note", "Sayfaya not ekle; Yorumlar panelinde görünür"),
     ("crop", "Kırp / Yakala", "crop", "Bir alanı görsel olarak yakala"),
 ]
 TOOL_NAMES = {t[0]: t[1] for t in TOOLS if t}
 # Tek harfli araç kısayolları (yazı yazılan alanlarda devreye girmez)
 TOOL_KEYS = {"select": "V", "text": "T", "edit": "E", "ink": "P", "highlight": "H", "line": "L",
-             "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "stamp": "S", "crop": "C"}
+             "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "stamp": "S", "crop": "C",
+             "blur": "B", "note": "M"}
 APP_ID = "PDFAnnotator.Belge"
 
 
@@ -870,6 +876,7 @@ class MainWindow(QMainWindow):
         A(m_view, "fit_page", "Tam sayfa", self.fit_page, "Ctrl+0")
         m_view.addSeparator()
         A(m_view, "grid", "Kenar paneli", self._toggle_side_panel, "Ctrl+B", needs_doc=False)
+        A(m_view, "comment", "Yorumlar paneli", self._show_comments_panel, "Ctrl+Shift+M")
         self.act_night = A(m_view, "contrast", "Gece modu", self.toggle_night_mode, checkable=True)
         self.act_compare = A(m_view, "compare", "Karşılaştırma modu", self.toggle_compare_mode,
                              checkable=True)
@@ -884,6 +891,11 @@ class MainWindow(QMainWindow):
         A(m_doc, "rotate_cw", "Saat yönünde döndür", lambda: self._rotate_current_page(90), "Ctrl+R")
         A(m_doc, "rotate_ccw", "Saatin tersine döndür", lambda: self._rotate_current_page(-90),
           "Ctrl+Shift+R")
+        m_doc.addSeparator()
+        A(m_doc, "crop", "Sayfaları kırp…", self.open_crop_pages)
+        A(m_doc, "headfoot", "Sayfa numarası, üstbilgi ve altbilgi…",
+          lambda: self.save_pdf_with_headfoot(False))
+        A(m_doc, "headfoot", "Bates numaralandır…", lambda: self.save_pdf_with_headfoot(True))
         m_doc.addSeparator()
         A(m_doc, "ocr", "OCR (metin tanıma)…", self.open_ocr_dialog)
         A(m_doc, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
@@ -911,6 +923,9 @@ class MainWindow(QMainWindow):
             ("compress", "Sıkıştırarak kaydet…", self.save_compressed),
             ("image", "Resim olarak kaydet (orijinal çözünürlük)", self.save_as_image),
             ("watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark),
+            ("headfoot", "Sayfa numaralı / üstbilgili PDF olarak kaydet…",
+             lambda: self.save_pdf_with_headfoot(False)),
+            ("headfoot", "Bates numaralı PDF olarak kaydet…", lambda: self.save_pdf_with_headfoot(True)),
             None,
             ("image", "Bu sayfayı PNG", lambda: self.export_image_current("png")),
             ("image", "Bu sayfayı JPEG", lambda: self.export_image_current("jpg")),
@@ -1059,6 +1074,15 @@ class MainWindow(QMainWindow):
 
         side.add_page("layers", "layers", "Bu sayfadaki işaretler", self._build_layers_tab())
 
+        self.comments = CommentsPanel()
+        self.comments.gotoRequested.connect(self._on_comment_goto)
+        self.comments.editRequested.connect(lambda _p, ann: self.edit_note(ann))
+        self.comments.replyRequested.connect(lambda _p, ann: self.reply_note(ann))
+        self.comments.toggleRequested.connect(lambda _p, ann: self.toggle_note_done(ann))
+        self.comments.deleteRequested.connect(lambda p, ann: self._delete_annotation_by_ref(ann, p))
+        self.comments.exportRequested.connect(self.export_comments)
+        side.add_page("comments", "comment", "Yorumlar", self.comments)
+
         self.btn_theme = side.add_bottom_button("sun", "Açık temaya geç", self.toggle_theme)
         side.pageChanged.connect(lambda k: setattr(self, "_last_side_page", k) if k else None)
         side.show_page("pages", animate=False)
@@ -1080,6 +1104,8 @@ class MainWindow(QMainWindow):
         self.view.textRequested.connect(self.on_text_requested)
         self.view.numberRequested.connect(self.on_number_requested)
         self.view.stampRequested.connect(self.on_stamp_requested)
+        self.view.noteRequested.connect(self.on_note_requested)
+        self.view.noteEditRequested.connect(self.edit_note)
         self.view.editTextRequested.connect(self.on_edit_text_requested)
         self.view.cropRequested.connect(self.on_crop_requested)
         self.view.imagePlaceRequested.connect(self.on_image_place_requested)
@@ -1399,6 +1425,18 @@ class MainWindow(QMainWindow):
         self._tool_pages["redact"] = idx; idx += 1
 
         self.prop_stack.addWidget(page(
+            self._combo_row("Biçim", [("Bulanık", "blur"), ("Mozaik", "pixel")],
+                            lambda v: setattr(self.state, "blur_mode", v)),
+            self._slider_row("Güç", 2, 40, int(self.state.blur_strength),
+                             lambda v: setattr(self.state, "blur_strength", float(v))),
+            self._hint("Bir alanı sürükleyip bırakın. Dışa aktarırken alan görüntü olarak "
+                      "bulanıklaştırılır ve altındaki metin PDF'ten KALICI silinir; mavi "
+                      "taralı kutu yalnızca düzenleme sırasında görünür. Okunmaması şart olan "
+                      "veriler için yine de 'Gizle' aracı daha güvenlidir.", warn=True),
+        ))
+        self._tool_pages["blur"] = idx; idx += 1
+
+        self.prop_stack.addWidget(page(
             self._slider_row("Opaklık", 5, 100, int(self.state.image_opacity * 100),
                              lambda v: setattr(self.state, "image_opacity", v / 100.0), "%"),
             self._checkbox_row("En-boy oranını koru", "image_keep_aspect"),
@@ -1483,6 +1521,15 @@ class MainWindow(QMainWindow):
                       "yüksek çözünürlükte görsel olarak çıkarır."),
         ))
         self._tool_pages["crop"] = idx; idx += 1
+
+        self.prop_stack.addWidget(page(
+            self._color_row("Not rengi", "note_color"),
+            self._hint("Sayfada notun yerini tıklayın, metni yazın. Notu çift tıklayarak "
+                      "düzenleyebilirsiniz. Tüm notlar sol şeritteki 'Yorumlar' panelinde "
+                      "listelenir; yanıtlanır ve 'çözüldü' işaretlenir. PDF'e gerçek bir "
+                      "not açıklaması olarak yazılır, başka okuyucularda da görünür."),
+        ))
+        self._tool_pages["note"] = idx; idx += 1
 
         for key, idx in self._tool_pages.items():
             pg = self.prop_stack.widget(idx)
@@ -1953,8 +2000,10 @@ class MainWindow(QMainWindow):
             ("Boşluk + sürükle", "Sayfayı kaydır"), ("Orta tuş + sürükle", "Sayfayı kaydır"),
             ("Ctrl+K", "Komut paleti"), ("Esc", "Seç aracına dön / seçimi kaldır"),
             ("Ctrl+Shift+K", "Kişisel verileri bul ve karart"), ("S", "Damga aracı"),
-            ("V T E P H L R O X I N S C", "Araçlar: Seç, Metin, Metin Düzenle, Kalem, Fosforlu, Çizgi, "
-                                          "Dörtgen, Oval, Gizle, Resim, Numarala, Damga, Kırp"),
+            ("V T E P H L R O X B I N S M C", "Araçlar: Seç, Metin, Metin Düzenle, Kalem, Fosforlu, Çizgi, "
+                                          "Dörtgen, Oval, Gizle, Bulanıklaştır, Resim, Numarala, Damga, "
+                                          "Not, Kırp/Yakala"),
+            ("Ctrl+Shift+M", "Yorumlar paneli"),
             ("Home / End", "İlk / son sayfa"), ("PgUp / PgDn", "Ekran ekran kaydır"),
             ("← / →", "Önceki / sonraki sayfa"), ("Ctrl+R / Ctrl+Shift+R", "Sayfayı döndür"),
         ]
@@ -1993,7 +2042,7 @@ class MainWindow(QMainWindow):
         self._place_floating()
         if tool == "number":
             self._refresh_number_label()
-        cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number")
+        cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number", "note")
                   else Qt.CursorShape.CrossCursor if tool != "select"
                   else Qt.CursorShape.ArrowCursor)
         self.view.viewport().setCursor(cursor)
@@ -2817,6 +2866,8 @@ class MainWindow(QMainWindow):
             self.view.refresh_page(page)
             if page == session.current_page:
                 self.refresh_layers_panel()
+            else:
+                self.refresh_comments_panel()
 
     def add_annotation(self, ann):
         s = self.active_session
@@ -3278,9 +3329,9 @@ class MainWindow(QMainWindow):
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kırpılamadı:\n{ex}")
             return
-        self._show_crop_dialog(qimg)
+        self._show_crop_dialog(qimg, rect)
 
-    def _show_crop_dialog(self, qimage: QImage):
+    def _show_crop_dialog(self, qimage: QImage, rect: QRectF = None):
         dlg = QDialog(self)
         dlg.setWindowTitle("Kırpılan Alan")
         v = QVBoxLayout(dlg)
@@ -3301,6 +3352,18 @@ class MainWindow(QMainWindow):
         btn_close = QPushButton("Kapat")
         row.addWidget(btn_copy); row.addWidget(btn_save); row.addWidget(btn_close)
         v.addLayout(row)
+        if rect is not None:
+            btn_page = QPushButton(icon("crop"), "Sayfayı bu alana kırp")
+            btn_page.setObjectName("secondary")
+            btn_page.setToolTip("Sayfanın görünen alanını bu bölgeyle sınırlar (Ctrl+Z ile geri alınır)")
+
+            def do_page_crop():
+                dlg.accept()
+                self._apply_crops({self.active_session.current_page:
+                                   fitz.Rect(rect.left(), rect.top(), rect.right(), rect.bottom())})
+
+            btn_page.clicked.connect(do_page_crop)
+            v.addWidget(btn_page)
 
         def do_copy():
             QApplication.clipboard().setImage(qimage)
@@ -3446,6 +3509,10 @@ class MainWindow(QMainWindow):
         if isinstance(ann, RedactionAnnotation):
             return ("edit_text", "Silinen orijinal metin") if getattr(ann, "quiet", False) \
                 else ("redact", "Sansür (kalıcı)")
+        if isinstance(ann, BlurAnnotation):
+            return "blur", "Bulanıklaştırma" if ann.mode == "blur" else "Mozaik"
+        if isinstance(ann, NoteAnnotation):
+            return "note", "Not: " + (ann.text.replace(chr(10), " ")[:20] or "(boş)")
         if isinstance(ann, NumberAnnotation):
             return "number", f"Numara {ann.number}"
         if isinstance(ann, ImageAnnotation):
@@ -3456,6 +3523,7 @@ class MainWindow(QMainWindow):
         return "layers", "Öge"
 
     def refresh_layers_panel(self):
+        self.refresh_comments_panel()
         if not hasattr(self, "layers_list"):
             return
         self.layers_list.clear()
@@ -3497,7 +3565,7 @@ class MainWindow(QMainWindow):
             if a is ann:
                 self.view.centerOn(gitem)
 
-    def _delete_annotation_by_ref(self, ann):
+    def _delete_annotation_by_ref(self, ann, page=None):
         gitem = None
         for k, v in self.view.item_ann_map.items():
             if v is ann:
@@ -3505,6 +3573,183 @@ class MainWindow(QMainWindow):
                 break
         if gitem is not None:
             self._delete_item(gitem)
+        elif page is not None and self.active_session:       # öğesi henüz çizilmemiş sayfa
+            s = self.active_session
+            s.undo_stack.push(RemoveAnnotationCommand(s, page, ann, on_change=self._on_session_change))
+
+    # =====================================================================
+    # Yapışkan notlar ve Yorumlar paneli
+    # =====================================================================
+    def _show_comments_panel(self):
+        self.side.show_page("comments")
+
+    def refresh_comments_panel(self):
+        if not hasattr(self, "comments"):
+            return
+        s = self.active_session
+        notes = []
+        if s:
+            for pidx in sorted(s.annotations):
+                notes += [(pidx, a) for a in s.annotations[pidx] if isinstance(a, NoteAnnotation)]
+        self.comments.set_notes(notes)
+
+    def _note_page(self, ann):
+        s = self.active_session
+        if s:
+            for pidx, lst in s.annotations.items():
+                if ann in lst:
+                    return pidx
+        return None
+
+    def on_note_requested(self, pt: QPointF):
+        s = self.active_session
+        if not s:
+            return
+        text = ask_note_text(self, "Yeni not", "")
+        if text is None or not text.strip():
+            return
+        pw, ph = s.pdf.page_size(s.current_page)
+        x = min(max(0.0, pt.x()), max(0.0, pw - NoteAnnotation.SIZE))
+        y = min(max(0.0, pt.y()), max(0.0, ph - NoteAnnotation.SIZE))
+        ann = NoteAnnotation(x, y, text.strip(), QColor(self.state.note_color))
+        s.undo_stack.push(AddAnnotationCommand(s, s.current_page, ann,
+                                               on_change=self._on_session_change, label="Not Ekle"))
+        self.status.setText("Not eklendi. Çift tıklayarak düzenleyebilir, Yorumlar panelinden yanıtlayabilirsiniz.")
+
+    def _push_note_state(self, ann, new_state, label):
+        s = self.active_session
+        page = self._note_page(ann)
+        if not s or page is None:
+            return
+        s.undo_stack.push(NoteStateCommand(s, page, ann, new_state,
+                                           on_change=self._on_session_change, label=label))
+
+    def edit_note(self, ann):
+        text = ask_note_text(self, "Notu düzenle", ann.text)
+        if text is None or not text.strip() or text.strip() == ann.text:
+            return
+        st = ann.snapshot()
+        st["text"] = text.strip()
+        self._push_note_state(ann, st, "Notu Düzenle")
+
+    def reply_note(self, ann):
+        text = ask_note_text(self, "Yanıtla", "", prompt=f"{ann.author} notuna yanıt")
+        if text is None or not text.strip():
+            return
+        from models import default_author, _now_iso
+        st = ann.snapshot()
+        st["replies"].append(dict(author=default_author(), created=_now_iso(), text=text.strip()))
+        self._push_note_state(ann, st, "Yanıt Ekle")
+
+    def toggle_note_done(self, ann):
+        st = ann.snapshot()
+        st["done"] = not ann.done
+        self._push_note_state(ann, st, "Çözüldü" if st["done"] else "Yeniden Aç")
+
+    def _on_comment_goto(self, page, ann):
+        self.goto_page(page)
+        for gitem, a in self.view.item_ann_map.items():
+            gitem.setSelected(a is ann)
+            if a is ann:
+                self.view.centerOn(gitem)
+
+    def export_comments(self):
+        s = self.active_session
+        if not s:
+            return
+        notes = []
+        for pidx in sorted(s.annotations):
+            notes += [(pidx, a) for a in s.annotations[pidx] if isinstance(a, NoteAnnotation)]
+        if not notes:
+            return
+        default = os.path.splitext(s.path)[0] + "_yorumlar.txt"
+        path, _ = QFileDialog.getSaveFileName(self, "Yorumları Kaydet", default, "Metin (*.txt)")
+        if not path:
+            return
+        lines = [f"Yorumlar — {s.title}", ""]
+        for pidx, n in notes:
+            lines.append(f"[Sayfa {pidx + 1}] {n.author} · {n.created}{' · ÇÖZÜLDÜ' if n.done else ''}")
+            lines.append(n.text)
+            for r in n.replies:
+                lines.append(f"    > {r.get('author', '')} · {r.get('created', '')}: {r.get('text', '')}")
+            lines.append("")
+        try:
+            with open(path, "w", encoding="utf-8") as f:
+                f.write("\n".join(lines))
+            self._toast_saved("Yorumlar kaydedildi", path)
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
+
+    # =====================================================================
+    # Sayfa numarası / üstbilgi / Bates ve sayfa kırpma
+    # =====================================================================
+    def save_pdf_with_headfoot(self, bates: bool):
+        s = self.active_session
+        if not s:
+            return
+        initial = getattr(self, "_headfoot_cfg", None) or HeadFootConfig()
+        dlg = HeadFootDialog(initial, s.pdf.page_count, os.path.basename(s.path), bates, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        cfg = dlg.get_config()
+        self._headfoot_cfg = cfg
+        suffix = "_bates" if bates else "_numarali"
+        default = os.path.splitext(s.path)[0] + suffix + ".pdf"
+        path, _ = QFileDialog.getSaveFileName(self, "PDF Olarak Kaydet", default, "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        try:
+            s.pdf.export_pdf(path, s.annotations, self.font_ctx, headfoot=cfg,
+                             security=getattr(s, "security", None),
+                             source_name=os.path.basename(s.path))
+            self.status.setText(f"Kaydedildi: {path}")
+            self._toast_saved("PDF kaydedildi", path)
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
+
+    def open_crop_pages(self):
+        s = self.active_session
+        if not s:
+            return
+
+        def auto(idx):
+            r = s.pdf.content_bbox(idx)
+            if r is None:
+                return None
+            w, h = s.pdf.page_size(idx)
+            return (r.y0, h - r.y1, r.x0, w - r.x1)
+
+        dlg = CropPagesDialog(s.pdf.page_count, s.current_page, s.pdf.page_size(s.current_page),
+                              auto, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        top, bottom, left, right = dlg.margins_pt()
+        crops = {}
+        for idx in dlg.pages():
+            w, h = s.pdf.page_size(idx)
+            if w - left - right < 20 or h - top - bottom < 20:
+                continue
+            crops[idx] = fitz.Rect(left, top, w - right, h - bottom)
+        if not crops:
+            QMessageBox.warning(self, "Kırp", "Kırpma değerleri sayfa boyutuna göre çok büyük.")
+            return
+        self._apply_crops(crops)
+
+    def _apply_crops(self, crops):
+        s = self.active_session
+        if not s:
+            return
+
+        def done():
+            self._mark_dirty()
+            self._build_thumbnails()
+            self.view.show_page(s, s.current_page, invert=self.night_mode)
+            self.refresh_layers_panel()
+
+        s.undo_stack.push(CropPagesCommand(s, crops, on_done=done))
+        self.toasts.show(f"{len(crops)} sayfa kırpıldı (Ctrl+Z ile geri alınır)")
 
     # =====================================================================
     # Karşılaştırma modu

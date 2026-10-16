@@ -671,6 +671,186 @@ class ImageAnnotation(Annotation):
         return obj
 
 
+@_register("blur")
+class BlurAnnotation(Annotation):
+    """Bulanıklaştırma / mozaik: dışa aktarırken alan görüntü olarak işlenir,
+    altındaki metin ve görseller PDF'ten KALICI silinir (okunamaz hâle gelir)."""
+
+    ZOOM = 3.0
+
+    def __init__(self, rect: QRectF, strength: float = 10.0, mode: str = "blur"):
+        super().__init__()
+        self.rect = QRectF(rect).normalized()
+        self.strength = float(strength)          # pt cinsinden bulanıklık gücü
+        self.mode = mode if mode in ("blur", "pixel") else "blur"
+        self._png: Optional[bytes] = None        # dışa aktarım sırasında hazırlanır
+        self._clip = None
+        self._rot = 0
+
+    def create_item(self) -> QGraphicsItem:
+        item = QGraphicsRectItem(self.rect)
+        c = QColor("#3a86ff")
+        fill = QColor(c)
+        fill.setAlphaF(0.22)
+        item.setBrush(QBrush(fill, Qt.BrushStyle.BDiagPattern if self.mode == "blur"
+                             else Qt.BrushStyle.Dense4Pattern))
+        item.setPen(QPen(c, 1.5, Qt.PenStyle.DashLine))
+        item.setToolTip("Bulanıklaştırma" if self.mode == "blur" else "Mozaik")
+        return item
+
+    def prepare(self, page: "fitz.Page") -> None:
+        """Alanı sayfadan çizip bulanıklaştırır (alan silinmeden ÖNCE çağrılır)."""
+        import io
+        from PIL import Image, ImageFilter
+        clip = fitz.Rect(self.rect.left(), self.rect.top(), self.rect.right(), self.rect.bottom())
+        clip &= page.rect
+        if clip.is_empty:
+            self._png = None
+            return
+        pix = page.get_pixmap(matrix=fitz.Matrix(self.ZOOM, self.ZOOM), clip=clip, alpha=False)
+        im = Image.open(io.BytesIO(pix.tobytes("png"))).convert("RGB")
+        if self.mode == "pixel":
+            block = max(2, int(self.strength * self.ZOOM * 0.6))
+            small = im.resize((max(1, im.width // block), max(1, im.height // block)),
+                              Image.Resampling.BILINEAR)
+            im = small.resize(im.size, Image.Resampling.NEAREST)
+        else:
+            im = im.filter(ImageFilter.GaussianBlur(max(1.0, self.strength * self.ZOOM * 0.5)))
+        buf = io.BytesIO()
+        im.save(buf, "PNG")
+        self._png = buf.getvalue()
+        # redact / insert_image döndürülmemiş sayfa koordinatı ister, get_pixmap ise görünen
+        un = fitz.Rect(clip) * page.derotation_matrix
+        un.normalize()
+        pos = page.cropbox_position
+        self._clip = fitz.Rect(un.x0 + pos.x, un.y0 + pos.y, un.x1 + pos.x, un.y1 + pos.y)
+        self._rot = int(page.rotation)
+
+    def erase_rect(self) -> "fitz.Rect":
+        return self._clip
+
+    def apply_to_page(self, page, font_ctx) -> None:
+        if not self._png:
+            return
+        page.insert_image(self._clip, stream=self._png, keep_proportion=False, overlay=True,
+                          rotate=self._rot)
+
+    def translate(self, dx, dy) -> None:
+        self.rect.translate(dx, dy)
+
+    def get_rect(self) -> Optional[QRectF]:
+        return QRectF(self.rect)
+
+    def set_rect(self, rect: QRectF) -> None:
+        self.rect = QRectF(rect).normalized()
+
+    def to_dict(self) -> dict:
+        return dict(type=self.TYPE, uid=self.uid, strength=self.strength, mode=self.mode,
+                    rect=[self.rect.x(), self.rect.y(), self.rect.width(), self.rect.height()])
+
+    @classmethod
+    def _from_dict(cls, d):
+        x, y, w, h = d["rect"]
+        obj = cls(QRectF(x, y, w, h), d.get("strength", 10.0), d.get("mode", "blur"))
+        obj.uid = d.get("uid", obj.uid)
+        return obj
+
+
+def _now_iso() -> str:
+    import datetime
+    return datetime.datetime.now().strftime("%Y-%m-%d %H:%M")
+
+
+def default_author() -> str:
+    import getpass
+    try:
+        return getpass.getuser() or "Kullanıcı"
+    except Exception:
+        return "Kullanıcı"
+
+
+@_register("note")
+class NoteAnnotation(Annotation):
+    """Yapışkan not: sayfada küçük bir not simgesi; metni, yazarı, yanıtları ve
+    'çözüldü' durumu vardır. PDF'e gerçek bir 'Not' (Text) açıklaması olarak yazılır."""
+
+    SIZE = 20.0
+
+    def __init__(self, x: float, y: float, text: str, color: QColor,
+                 author: str = "", created: str = "", done: bool = False,
+                 replies: Optional[List[dict]] = None):
+        super().__init__()
+        self.x, self.y = float(x), float(y)
+        self.text = text
+        self.color = QColor(color)
+        self.author = author or default_author()
+        self.created = created or _now_iso()
+        self.done = bool(done)
+        self.replies: List[dict] = list(replies or [])    # {author, created, text}
+
+    # tam metin: not + yanıtlar (PDF içeriği ve ipucu için)
+    def full_text(self) -> str:
+        parts = [self.text]
+        for r in self.replies:
+            parts.append(f"\n> {r.get('author', '')}: {r.get('text', '')}")
+        return "".join(parts)
+
+    def create_item(self) -> QGraphicsItem:
+        s = self.SIZE
+        group = QGraphicsItemGroup()
+        body = QGraphicsRectItem(self.x, self.y, s, s)
+        base = QColor("#9aa0a6") if self.done else QColor(self.color)
+        body.setBrush(QBrush(base))
+        body.setPen(QPen(base.darker(150), 1.2))
+        group.addToGroup(body)
+        pen = QPen(QColor(0, 0, 0, 150), 1.4)
+        for i in range(3):
+            ln = QGraphicsPathItem()
+            path = QPainterPath()
+            yy = self.y + 5.5 + i * 4.2
+            path.moveTo(self.x + 4, yy)
+            path.lineTo(self.x + s - 4 - (5 if i == 2 else 0), yy)
+            ln.setPath(path)
+            ln.setPen(pen)
+            group.addToGroup(ln)
+        group.setToolTip(f"{self.author} · {self.created}\n{self.full_text()}")
+        return group
+
+    def apply_to_page(self, page, font_ctx) -> None:
+        annot = page.add_text_annot(fitz.Point(self.x, self.y), self.full_text(), icon="Note")
+        try:
+            annot.set_colors(stroke=qcolor_to_fitz(self.color))
+            annot.set_info(title=self.author)
+            annot.update()
+        except Exception:
+            pass
+
+    def translate(self, dx, dy) -> None:
+        self.x += dx
+        self.y += dy
+
+    def snapshot(self) -> dict:
+        return dict(text=self.text, done=self.done, replies=[dict(r) for r in self.replies])
+
+    def restore(self, st: dict) -> None:
+        self.text = st["text"]
+        self.done = st["done"]
+        self.replies = [dict(r) for r in st["replies"]]
+
+    def to_dict(self) -> dict:
+        return dict(type=self.TYPE, uid=self.uid, x=self.x, y=self.y, text=self.text,
+                    color=color_to_hex_alpha(self.color), author=self.author,
+                    created=self.created, done=self.done, replies=self.replies)
+
+    @classmethod
+    def _from_dict(cls, d):
+        obj = cls(d["x"], d["y"], d.get("text", ""), color_from_hex_alpha(d["color"]),
+                  d.get("author", ""), d.get("created", ""), d.get("done", False),
+                  d.get("replies", []))
+        obj.uid = d.get("uid", obj.uid)
+        return obj
+
+
 # ---------------------------------------------------------------------------
 # Filigran (Watermark) yapılandırması
 # ---------------------------------------------------------------------------
@@ -714,6 +894,9 @@ class ToolState:
         self.hl_color = QColor("#fff176")
         self.redact_color = QColor("#000000")
         self.number_color = QColor("#e63946")
+        self.blur_strength = 10.0
+        self.blur_mode = "blur"          # "blur" | "pixel"
+        self.note_color = QColor("#ffd23f")
         self.pen_width = 3.0
         self.pen_opacity = 1.0
         self.font_size = 20.0
@@ -861,6 +1044,57 @@ class ZOrderCommand(_AnnotationCommandBase):
             idx = min(self.old_index, len(lst))
             lst.insert(idx, self.ann)
         self._notify()
+
+
+
+class NoteStateCommand(_AnnotationCommandBase):
+    """Notun metnini / yanıtlarını / çözüldü durumunu değiştirir (geri alınabilir)."""
+
+    def __init__(self, session, page, ann: "NoteAnnotation", new_state: dict, on_change=None,
+                 label="Not Değişikliği"):
+        super().__init__(session, page, on_change, label)
+        self.ann = ann
+        self.old = ann.snapshot()
+        self.new = new_state
+
+    def redo(self):
+        self.ann.restore(self.new)
+        self._notify()
+
+    def undo(self):
+        self.ann.restore(self.old)
+        self._notify()
+
+
+class CropPagesCommand(QUndoCommand):
+    """Sayfaları kırpar: görünür alan küçülür, mevcut işaretler yeni orijine göre kaydırılır."""
+
+    def __init__(self, session: "DocumentSession", crops: Dict[int, "fitz.Rect"],
+                 on_done: Optional[Callable[[], None]] = None, label="Sayfaları Kırp"):
+        super().__init__(label)
+        self.session = session
+        self.crops = dict(crops)               # sayfa -> görünür (döndürülmüş) koordinatta yeni alan
+        self.on_done = on_done
+        self._old: Dict[int, "fitz.Rect"] = {}
+
+    def redo(self):
+        pdf = self.session.pdf
+        for idx, vis in self.crops.items():
+            self._old[idx] = pdf.crop_page(idx, vis)
+            for ann in self.session.annotations.get(idx, []):
+                ann.translate(-vis.x0, -vis.y0)
+        if self.on_done:
+            self.on_done()
+
+    def undo(self):
+        pdf = self.session.pdf
+        for idx, vis in self.crops.items():
+            if idx in self._old:
+                pdf.restore_cropbox(idx, self._old[idx])
+            for ann in self.session.annotations.get(idx, []):
+                ann.translate(vis.x0, vis.y0)
+        if self.on_done:
+            self.on_done()
 
 
 # ---------------------------------------------------------------------------

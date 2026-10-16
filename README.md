@@ -27,7 +27,7 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 
 | Dosya            | Sorumluluk                                                            |
 |------------------|------------------------------------------------------------------------|
-| `models.py`      | Annotation ailesi (Text/Ink/Line/Shape/Highlight/Redaction/Number/**Image**), `WatermarkConfig`, `ToolState`, `DocumentSession`, **QUndoCommand** alt sınıfları |
+| `models.py`      | Annotation ailesi (Text/Ink/Line/Shape/Highlight/Redaction/Number/**Image**/**Blur**/**Note**), `WatermarkConfig`, `ToolState`, `DocumentSession`, **QUndoCommand** alt sınıfları |
 | `pdf_engine.py`  | `PDFDocument` (PyMuPDF sarmalayıcı): **LRU önbellekli + asenkron (QThreadPool) render**, arama, İçindekiler, sayfa yönetimi/döndürme, PDF & görsel dışa aktarım, **filigran motoru**, JSON proje kaydı |
 | `gizmo.py`       | Seçili nesneler için **8 noktalı boyutlandırma kulpları** |
 | `views.py`       | `PDFView` (canvas etkileşimleri, **Bézier/Catmull-Rom ink yumuşatma**, arama vurguları), `ComparePane` (karşılaştırma modu) |
@@ -42,6 +42,9 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/docdialogs.py` | Parola, sıkıştırma, belge bilgileri ve güvenlik denetimi pencereleri |
 | `pii.py`         | Kişisel veri bulucu (TC, IBAN, telefon, e-posta, plaka, kart); kontrol haneli doğrulama |
 | `ui/kvkk.py`     | "Kişisel verileri bul ve karart" penceresi |
+| `headfoot.py`    | Sayfa numarası / üstbilgi / altbilgi / Bates motoru (`HeadFootConfig`, `apply_header_footer`) |
+| `ui/pagetools.py`| Üstbilgi/Bates ve sayfa kırpma pencereleri |
+| `ui/comments.py` | Yorumlar paneli (yapışkan notlar, yanıtlar, çözüldü) |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
@@ -166,7 +169,7 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 * **Ctrl+K komut paleti:** Yazarak her komuta ulaşın ("döndür", "filigran",
   "ocr", "kalem", "sayfa 12"…). Türkçe karakter yazmanız gerekmez.
 * **Tek harfli araç kısayolları:** V Seç, T Metin, E Metin Düzenle, P Kalem,
-  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, I Resim, N Numarala, C Kırp.
+  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, B Bulanıklaştır, I Resim, N Numarala, S Damga, M Not, C Kırp/Yakala.
   Esc seç aracına döner. Yazı alanlarındayken devreye girmez.
 * **Bildirimler:** Kaydetme vb. sonuçlar köşede kısa bir bildirimle gösterilir
   ("Klasörde göster" bağlantısıyla). Hatalar yine pencere olarak çıkar.
@@ -204,3 +207,33 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 * **Belge → Güvenlik denetimi:** JavaScript, otomatik eylemler, program çalıştırma,
   veri gönderme, gömülü dosyalar, çoklu ortam, dış bağlantılar, gizli katmanlar ve
   metadata listelenir; seçilenler tek tıkla temizlenir.
+
+## Yeni: Numaralandırma, kırpma, bulanıklaştırma ve notlar
+
+* **Belge → Sayfa numarası, üstbilgi ve altbilgi:** Üst ve altta sol / orta / sağ
+  olmak üzere altı alana metin yazılır. Yer tutucular: `{sayfa}`, `{toplam}`,
+  `{tarih}`, `{dosya}`, `{bates}`. Hazır düzenler, ilk sayfa numarası, sayfa aralığı,
+  "kapağa yazma" ve yazı rengi/boyutu seçilebilir; pencerede canlı önizleme metni
+  görünür. Döndürülmüş ve kırpılmış sayfalarda da düz yazılır. Sonuç yeni bir PDF
+  olarak kaydedilir, açık belgeniz değişmez.
+* **Belge → Bates numaralandır:** `ÖNEK-000001` biçiminde ardışık, benzersiz sayfa
+  tanıtıcısı (önek, hane sayısı, başlangıç değeri, sonek). Başlangıç değerini
+  değiştirerek ikinci bir seti kaldığınız yerden sürdürebilirsiniz.
+* **Belge → Sayfaları kırp:** Dört kenardan mm cinsinden kırpma, "içeriğe göre
+  otomatik" (beyaz kenarları algılar) ve bu sayfa / tüm sayfalar / aralık seçimi.
+  Mevcut işaretler yeni köşeye göre kayar; **Ctrl+Z** her şeyi geri alır. Yakala
+  aracıyla (C) bir alan seçince açılan pencerede "Sayfayı bu alana kırp" da vardır.
+  Kırpma sayfanın görünen alanını (CropBox) küçültür, içerik silinmez.
+* **Bulanıklaştır aracı (B):** Alanı sürükleyin; biçim **Bulanık** ya da **Mozaik**,
+  güç kaydırıcıyla ayarlanır. Dışa aktarırken alan görüntü olarak işlenir ve
+  altındaki metin PDF'ten kalıcı silinir (kopyalanıp okunamaz). Düzenleme
+  sırasında mavi taralı kutu görünür. Kesin gizlilik gereken veriler için yine
+  "Gizle" aracı önerilir. Bulanıklık, kendisinden sonra eklenen işaretleri etkilemez.
+* **Yapışkan Not aracı (M) ve Yorumlar paneli (Ctrl+Shift+M):** Sayfaya tıklayıp not
+  yazın; çift tıklayarak düzenleyin, taşıyın. Sol şeritteki **Yorumlar** paneli tüm
+  notları sayfa sırasıyla listeler; tıklayınca sayfaya gider. **Yanıtla**,
+  **Çözüldü / Yeniden aç**, **Düzenle**, **Sil**, açık/çözüldü süzgeci, arama ve
+  "Yorumları metin olarak kaydet" vardır. Her değişiklik geri alınabilir. Notlar
+  PDF'e gerçek "Not" açıklaması olarak yazılır (yanıtlar içeriğine eklenir), böylece
+  başka PDF okuyucularında da görünür; proje (JSON) dosyasına yanıtlarıyla kaydedilir.
+  Bu sürümde PDF'in içinde zaten bulunan eski notlar panele alınmaz.
