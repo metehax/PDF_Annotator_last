@@ -914,6 +914,8 @@ class ToolState:
         self.image_opacity = 1.0
         self.image_keep_aspect = True
         self.watermark = WatermarkConfig()
+        self.form_kind = "text"          # Form Alanı aracı: forms.FIELD_KINDS anahtarı
+        self.form_ask = True             # oluştururken özellik penceresini aç
 
 
 # ---------------------------------------------------------------------------
@@ -1095,6 +1097,87 @@ class CropPagesCommand(QUndoCommand):
                 ann.translate(vis.x0, vis.y0)
         if self.on_done:
             self.on_done()
+
+
+class FormValuesCommand(QUndoCommand):
+    """Form alanlarının değerlerini yazar (ad -> değer; reset=True: tümünü boşalt).
+    Hesaplanan alanlar her seferinde yeniden hesaplanır."""
+
+    def __init__(self, session: "DocumentSession", values: Optional[Dict[str, str]] = None,
+                 reset: bool = False, on_done: Optional[Callable[[List[int]], None]] = None,
+                 label="Form Doldur"):
+        super().__init__(label)
+        self.session = session
+        self.values = dict(values or {})
+        self.reset = reset
+        self.on_done = on_done
+        self._before: Optional[Dict[str, str]] = None
+        self._after: Optional[Dict[str, str]] = None
+
+    def _apply(self, values: Dict[str, str]) -> List[int]:
+        import forms
+        pdf = self.session.pdf
+        with pdf.lock:
+            pages = set(forms.apply_values(pdf.doc, values))
+            pages.update(forms.recalculate(pdf.doc))
+        return sorted(pages)
+
+    def redo(self):
+        import forms
+        pdf = self.session.pdf
+        if self._after is None:
+            with pdf.lock:
+                self._before = forms.snapshot_values(pdf.doc)
+                if self.reset:
+                    pages = forms.reset_values(pdf.doc)
+                else:
+                    pages = forms.apply_values(pdf.doc, self.values)
+                    pages = sorted(set(pages) | set(forms.recalculate(pdf.doc)))
+                after = forms.snapshot_values(pdf.doc)
+            self._after = {k: v for k, v in after.items() if self._before.get(k) != v}
+            self._before = {k: self._before.get(k, "") for k in self._after}
+        else:
+            pages = self._apply(self._after)
+        if self.on_done:
+            self.on_done(pages)
+
+    def undo(self):
+        pages = self._apply(self._before or {})
+        if self.on_done:
+            self.on_done(pages)
+
+
+class FormFieldCommand(QUndoCommand):
+    """Form alanı ekler (old=None), siler (new=None) ya da özelliklerini değiştirir.
+    Tanımlar forms.field_spec biçimindedir; alan /NM kimliğini korur."""
+
+    def __init__(self, session: "DocumentSession", page: int, old_spec: Optional[dict],
+                 new_spec: Optional[dict], on_done: Optional[Callable[[List[int]], None]] = None,
+                 label="Form Alanı"):
+        super().__init__(label)
+        self.session = session
+        self.page = page
+        self.old_spec = dict(old_spec) if old_spec else None
+        self.new_spec = dict(new_spec) if new_spec else None
+        self.on_done = on_done
+
+    def _swap(self, remove: Optional[dict], add: Optional[dict]) -> None:
+        import forms
+        pdf = self.session.pdf
+        with pdf.lock:
+            if remove:
+                forms.delete_field(pdf.doc, self.page, remove["nm"])
+            if add:
+                add["nm"] = forms.add_field(pdf.doc, self.page, add)
+            forms.recalculate(pdf.doc)
+        if self.on_done:
+            self.on_done(list(range(pdf.page_count)))
+
+    def redo(self):
+        self._swap(self.old_spec, self.new_spec)
+
+    def undo(self):
+        self._swap(self.new_spec, self.old_spec)
 
 
 # ---------------------------------------------------------------------------

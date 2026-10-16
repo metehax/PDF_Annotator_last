@@ -81,6 +81,7 @@ class PageItem(QGraphicsItem):
         self.ann_items: List[QGraphicsItem] = []
         self.search_items: List[QGraphicsItem] = []
         self.edit_items: List[QGraphicsItem] = []
+        self.form_items: List[QGraphicsItem] = []
 
     def page_rect(self) -> QRectF:
         return QRectF(0, 0, self.w, self.h)
@@ -129,6 +130,9 @@ class PDFView(QGraphicsView):
     noteRequested = Signal(QPointF)                  # not aracıyla tıklandı
     noteEditRequested = Signal(object)               # bir nota çift tıklandı (NoteAnnotation)
     zoomChanged = Signal(float)
+    formFieldClicked = Signal(int, QPointF)          # Seç aracıyla bir form alanına tıklandı
+    formFieldRequested = Signal(int, QRectF)         # Form Alanı aracıyla kutu çizildi
+    formFieldEditRequested = Signal(int, QPointF)    # Form Alanı aracıyla mevcut alana tıklandı
 
     # Tüm konum sinyalleri (textRequested, numberRequested, …) SAYFA
     # koordinatlarıyla yayılır; hangi sayfa olduğu `current_page`'dir ve
@@ -165,6 +169,10 @@ class PDFView(QGraphicsView):
         self._layout_sig = None
         self._current = 0
         self._hover_idx = -1
+        # (sayfa, x, y) -> bu noktada form alanı var mı; MainWindow atar
+        self.form_hit: Optional[Callable[[int, float, float], bool]] = None
+        self._form_rects: Dict[int, list] = {}
+        self._form_cursor = False
         self.setMouseTracking(True)
         self._programmatic_scroll = False
         self._zoom = 1.0
@@ -288,6 +296,7 @@ class PDFView(QGraphicsView):
             self._populate_annotations(i)
         self._apply_search_state(center=False)
         self._draw_edit_boxes()
+        self._apply_form_overlay()
         self._schedule_render(0)
 
     def show_page(self, session, index: Optional[int], invert: bool = False,
@@ -600,6 +609,36 @@ class PDFView(QGraphicsView):
             box.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
             p.edit_items.append(box)
 
+    def set_form_overlay(self, rects_by_page: Dict[int, list]) -> None:
+        """Form alanlarını açık mavi kutuyla vurgular (yalnızca ekranda)."""
+        self._form_rects = rects_by_page or {}
+        self._apply_form_overlay()
+
+    def _apply_form_overlay(self) -> None:
+        pen = QPen(QColor(58, 134, 255, 150), 0.8)
+        brush = QBrush(QColor(58, 134, 255, 34))
+        for p in self._pages:
+            for it in p.form_items:
+                if it.scene() is not None:
+                    self.scene_obj.removeItem(it)
+            p.form_items = []
+            for r in self._form_rects.get(p.index, []):
+                box = QGraphicsRectItem(QRectF(r), p)
+                box.setPen(pen)
+                box.setBrush(brush)
+                box.setZValue(30)
+                box.setAcceptedMouseButtons(Qt.MouseButton.NoButton)
+                p.form_items.append(box)
+
+    def _ann_item_at(self, view_pos) -> bool:
+        gi = self.itemAt(view_pos)
+        while gi is not None and gi not in self.item_ann_map:
+            gi = gi.parentItem()
+        return gi is not None
+
+    def _form_at(self, page, pt) -> bool:
+        return bool(self.form_hit and page is not None and self.form_hit(page.index, pt.x(), pt.y()))
+
     def set_all_search_highlights(self, results: Dict[int, list], active=None,
                                   center: bool = False) -> None:
         """results: sayfa -> [fitz.Rect]; active: (sayfa, sıra) ya da None."""
@@ -701,12 +740,21 @@ class PDFView(QGraphicsView):
         tool = self.state.tool
 
         if tool == "select":
+            if e.button() == Qt.MouseButton.LeftButton and page is not None                     and not self._ann_item_at(e.position().toPoint()):
+                lpt = self._local(page, scene_pt)
+                if self._form_at(page, lpt):
+                    self.formFieldClicked.emit(page.index, lpt)
+                    return
             super().mousePressEvent(e)
             return
         if page is None:
             return
         pt = self._local(page, scene_pt)
         self._active_page = page
+
+        if tool == "form" and e.button() == Qt.MouseButton.LeftButton and self._form_at(page, pt):
+            self.formFieldEditRequested.emit(page.index, pt)
+            return
 
         if tool == "text":
             if e.button() == Qt.MouseButton.LeftButton:
@@ -785,6 +833,13 @@ class PDFView(QGraphicsView):
             item.setPen(QPen(QColor("#3a86ff"), 1.5, Qt.PenStyle.DashLine))
             self._add_temp(item)
 
+        elif tool == "form":
+            item = QGraphicsRectItem()
+            fc = QColor("#3a86ff"); fc.setAlphaF(0.15)
+            item.setBrush(QBrush(fc))
+            item.setPen(QPen(QColor("#3a86ff"), 1.2))
+            self._add_temp(item)
+
         elif tool == "image":
             item = QGraphicsRectItem()
             fc = QColor("#2ec4b6"); fc.setAlphaF(0.12)
@@ -846,6 +901,15 @@ class PDFView(QGraphicsView):
             if idx != self._hover_idx:
                 self._hover_idx = idx
                 self.hoveredPageChanged.emit(idx)
+            if self.state.tool in ("select", "form") and not self._space_down:
+                over = page is not None and self._form_at(
+                    page, self._local(page, self.mapToScene(e.position().toPoint())))
+                if over != self._form_cursor:
+                    self._form_cursor = over
+                    if over:
+                        self.viewport().setCursor(Qt.CursorShape.PointingHandCursor)
+                    else:
+                        self._restore_tool_cursor()
             super().mouseMoveEvent(e)
             return
 
@@ -877,7 +941,7 @@ class PDFView(QGraphicsView):
                 path.moveTo(end); path.lineTo(*w2)
             self._temp_item.setPath(path)
 
-        elif tool in ("rect", "oval", "redact", "blur", "crop", "image"):
+        elif tool in ("rect", "oval", "redact", "blur", "crop", "image", "form"):
             self._temp_item.setRect(QRectF(self._start, pt).normalized())
 
         elif tool == "highlight":
@@ -934,6 +998,13 @@ class PDFView(QGraphicsView):
             self._clear_temp()
             if rect.width() > 2 and rect.height() > 2:
                 self.cropRequested.emit(rect)
+            self._ink_points = []
+            self._hl_fixed_y = None
+            return
+        elif tool == "form":
+            rect = QRectF(self._start, pt).normalized()
+            self._clear_temp()
+            self.formFieldRequested.emit(self._active_page.index, rect)
             self._ink_points = []
             self._hl_fixed_y = None
             return

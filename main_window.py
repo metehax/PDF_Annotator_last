@@ -32,14 +32,15 @@ from PySide6.QtWidgets import (
     QDialogButtonBox, QFileDialog, QFormLayout, QFrame,
     QHBoxLayout, QInputDialog, QLabel, QLineEdit, QListWidget,
     QListWidgetItem, QMainWindow, QMenu, QMessageBox, QPlainTextEdit,
-    QProgressBar, QPushButton,
+    QProgressBar, QProgressDialog, QPushButton,
     QSizePolicy, QSlider, QSpinBox,
     QSplitter, QStackedWidget, QTabBar, QToolButton, QTreeWidget,
     QTreeWidgetItem, QVBoxLayout, QWidget,
 )
 
 from models import (
-    AddAnnotationCommand, BlurAnnotation, CropPagesCommand, DocumentSession, HighlightAnnotation,
+    AddAnnotationCommand, BlurAnnotation, CropPagesCommand, DocumentSession, FormFieldCommand,
+    FormValuesCommand, HighlightAnnotation,
     ImageAnnotation, InkAnnotation, LineAnnotation, MoveAnnotationCommand, NoteAnnotation,
     NoteStateCommand, NumberAnnotation, RedactionAnnotation, RemoveAnnotationCommand,
     ResizeAnnotationCommand, ShapeAnnotation, TextAnnotation, ToolState,
@@ -60,6 +61,8 @@ import docsec
 from headfoot import HeadFootConfig
 from ui.docdialogs import CompressDialog, DocInfoDialog, PasswordDialog, SecurityCheckDialog
 from ui.comments import CommentsPanel, ask_note_text
+import forms
+from ui.formui import FormFieldDialog, FormFieldEditor, FormsPanel
 from ui.kvkk import KvkkDialog
 from ui.pagetools import CropPagesDialog, HeadFootDialog
 from ui.palette import Command, CommandPalette
@@ -97,12 +100,13 @@ TOOLS = [
     ("stamp", "Damga", "stamp", "Hazır ya da kendi damganızı basın"),
     ("note", "Yapışkan Not", "note", "Sayfaya not ekle; Yorumlar panelinde görünür"),
     ("crop", "Kırp / Yakala", "crop", "Bir alanı görsel olarak yakala"),
+    ("form", "Form Alanı", "form", "Doldurulabilir form alanı oluştur (metin, onay, liste, tarih…)"),
 ]
 TOOL_NAMES = {t[0]: t[1] for t in TOOLS if t}
 # Tek harfli araç kısayolları (yazı yazılan alanlarda devreye girmez)
 TOOL_KEYS = {"select": "V", "text": "T", "edit": "E", "ink": "P", "highlight": "H", "line": "L",
              "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "stamp": "S", "crop": "C",
-             "blur": "B", "note": "M"}
+             "blur": "B", "note": "M", "form": "F"}
 APP_ID = "PDFAnnotator.Belge"
 
 
@@ -844,6 +848,8 @@ class MainWindow(QMainWindow):
         A(m_file, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
         A(m_file, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
         m_file.addSeparator()
+        A(m_file, "printer", "Yazdır…", self.print_document, "Ctrl+P")
+        m_file.addSeparator()
         A(m_file, "project", "Projeyi kaydet (JSON)…", self.save_project)
         A(m_file, "folder", "Proje aç (JSON)…", self.open_project, needs_doc=False)
         m_file.addSeparator()
@@ -906,6 +912,17 @@ class MainWindow(QMainWindow):
         A(m_doc, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
         A(m_doc, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
 
+        m_form = QMenu("Form", self)
+        A(m_form, "form", "Formlar paneli", lambda: self.side.show_page("forms"))
+        A(m_form, "plus", "Yeni form alanı (araç)", lambda: self._tool_shortcut("form"))
+        A(m_form, "sliders", "Seçili alanın özellikleri…",
+          lambda: self.edit_form_field(self.forms_panel.current_field()))
+        A(m_form, "trash", "Seçili alanı sil",
+          lambda: self.delete_form_field(self.forms_panel.current_field()))
+        m_form.addSeparator()
+        A(m_form, "reset", "Formu sıfırla", self.reset_form)
+        A(m_form, "calc", "Alanları yeniden hesapla", self.recalculate_form)
+
         m_help = QMenu("Yardım", self)
         A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
         m_help.addSeparator()
@@ -939,7 +956,7 @@ class MainWindow(QMainWindow):
             icon_name, text, slot = entry
             self.export_menu.addAction(icon(icon_name), text, slot)
         self._menus = [("Dosya", m_file), ("Düzenle", m_edit), ("Görünüm", m_view),
-                       ("Belge", m_doc), ("Yardım", m_help)]
+                       ("Belge", m_doc), ("Form", m_form), ("Yardım", m_help)]
         return self._menus
 
     # -- üst çubuk ----------------------------------------------------------
@@ -1083,6 +1100,16 @@ class MainWindow(QMainWindow):
         self.comments.exportRequested.connect(self.export_comments)
         side.add_page("comments", "comment", "Yorumlar", self.comments)
 
+        self.forms_panel = FormsPanel()
+        self.forms_panel.gotoRequested.connect(self._on_form_goto)
+        self.forms_panel.propsRequested.connect(self.edit_form_field)
+        self.forms_panel.deleteRequested.connect(self.delete_form_field)
+        self.forms_panel.resetRequested.connect(self.reset_form)
+        self.forms_panel.recalcRequested.connect(self.recalculate_form)
+        self.forms_panel.newRequested.connect(lambda: self._tool_shortcut("form"))
+        self.forms_panel.highlightToggled.connect(lambda _v: self._refresh_form_overlay())
+        side.add_page("forms", "form", "Formlar", self.forms_panel)
+
         self.btn_theme = side.add_bottom_button("sun", "Açık temaya geç", self.toggle_theme)
         side.pageChanged.connect(lambda k: setattr(self, "_last_side_page", k) if k else None)
         side.show_page("pages", animate=False)
@@ -1109,6 +1136,13 @@ class MainWindow(QMainWindow):
         self.view.editTextRequested.connect(self.on_edit_text_requested)
         self.view.cropRequested.connect(self.on_crop_requested)
         self.view.imagePlaceRequested.connect(self.on_image_place_requested)
+        self.view.form_hit = self._form_hit
+        self.view.formFieldClicked.connect(self.on_form_field_clicked)
+        self.view.formFieldRequested.connect(self.on_form_field_requested)
+        self.view.formFieldEditRequested.connect(
+            lambda p, pt: self.edit_form_field(forms.field_at(self._form_fields, p, pt.x(), pt.y())))
+        self.view.verticalScrollBar().valueChanged.connect(lambda _v: self._finish_form_editor())
+        self.view.zoomChanged.connect(lambda _z: self._finish_form_editor())
         self.view.itemsMoved.connect(self.sync_moved_items)
         self.view.resizeRequested.connect(self.on_resize_requested)
         self.view.contextMenuRequested.connect(self.show_item_context_menu)
@@ -1531,6 +1565,17 @@ class MainWindow(QMainWindow):
         ))
         self._tool_pages["note"] = idx; idx += 1
 
+        self.prop_stack.addWidget(page(
+            self._combo_row("Alan türü", [(t, k) for k, t in forms.FIELD_KINDS],
+                            lambda v: setattr(self.state, "form_kind", v)),
+            self._checkbox_row("Özellikleri sor", "form_ask",
+                               "Kapalıysa alan varsayılan adla hemen oluşturulur"),
+            self._hint("Sayfada bir kutu çizin (onay/radyo için tıklamak yeter). Mevcut bir alana "
+                      "tıklarsanız özellikleri açılır. Doldurmak için Seç aracıyla alana tıklayın; "
+                      "tüm alanlar sol şeritteki 'Formlar' panelinde listelenir."),
+        ))
+        self._tool_pages["form"] = idx; idx += 1
+
         for key, idx in self._tool_pages.items():
             pg = self.prop_stack.widget(idx)
             if not pg.title_label.text():
@@ -1770,6 +1815,9 @@ class MainWindow(QMainWindow):
         if self.palette.isVisible():
             self.palette.close_palette()
             return
+        if getattr(self, "_form_editor", None) is not None:
+            self._form_editor.cancel()
+            return
         if not self.active_session:
             return
         self.view.scene_obj.clearSelection()
@@ -1799,7 +1847,8 @@ class MainWindow(QMainWindow):
                 cmds.append(Command(f"{label} aracı", lambda k=key: self._tool_shortcut(k), "Araç",
                                     icon_name, TOOL_KEYS[key]))
             for key, title, icon_name in (("pages", "Sayfalar", "grid"), ("toc", "İçindekiler", "list"),
-                                          ("search", "Ara", "search"), ("layers", "İşaretler", "layers")):
+                                          ("search", "Ara", "search"), ("layers", "İşaretler", "layers"),
+                                          ("forms", "Formlar", "form")):
                 cmds.append(Command(f"{title} panelini göster", lambda k=key: self.side.show_page(k),
                                     "Panel", icon_name))
 
@@ -2212,6 +2261,7 @@ class MainWindow(QMainWindow):
             self._refresh_number_label()
         if not self.sessions:
             self.active_session = None
+            self._refresh_forms()
             self._set_ui_enabled(False)
             self.thumb_list.clear()
             self.toc_tree.clear()
@@ -2616,9 +2666,312 @@ class MainWindow(QMainWindow):
     # =====================================================================
     _THUMB_LOADED = Qt.ItemDataRole.UserRole + 1
 
+    # -- PDF formları ---------------------------------------------------------
+    def _refresh_forms(self):
+        """Alan listesini belgeden yeniden okur; paneli ve vurguları tazeler."""
+        s = self.active_session
+        fields = []
+        if s is not None:
+            with s.pdf.lock:
+                fields = forms.list_fields(s.pdf.doc)
+        self._form_fields = fields
+        if hasattr(self, "forms_panel"):
+            self.forms_panel.set_fields(fields)
+        self._refresh_form_overlay()
+
+    def _refresh_form_overlay(self):
+        on = not hasattr(self, "forms_panel") or self.forms_panel.chk_highlight.isChecked()
+        by_page = {}
+        if on:
+            for f in getattr(self, "_form_fields", []):
+                r = f.rect
+                by_page.setdefault(f.page, []).append(QRectF(r.x0, r.y0, r.width, r.height))
+        self.view.set_form_overlay(by_page)
+
+    def _form_hit(self, page, x, y):
+        return forms.field_at(getattr(self, "_form_fields", []), page, x, y) is not None
+
+    def _forms_changed(self, pages):
+        s = self.active_session
+        if not s:
+            return
+        for p in pages:
+            if 0 <= p < s.pdf.page_count:
+                s.pdf._invalidate_page(p)
+        self._refresh_forms()
+        for p in pages:
+            if 0 <= p < s.pdf.page_count:
+                self.view.refresh_page(p)
+
+    def _push_form_values(self, values, label="Form Doldur"):
+        s = self.active_session
+        if not s:
+            return
+        s.undo_stack.push(FormValuesCommand(s, values, on_done=self._forms_changed, label=label))
+
+    def on_form_field_clicked(self, page, pt):
+        f = forms.field_at(self._form_fields, page, pt.x(), pt.y())
+        if f is None:
+            return
+        if f.kind == "checkbox":
+            self._push_form_values({f.name: "Off" if f.checked else f.on_state})
+        elif f.kind == "radio":
+            if not f.checked:
+                self._push_form_values({f.name: f.on_state})
+        elif f.kind == "calc":
+            self.toasts.show(f"'{f.name}' hesaplanan bir alan: {f.value or 'boş'} "
+                             f"({dict(forms.CALC_OPS).get(f.calc_op, '')}: {', '.join(f.calc_sources)})")
+        elif f.kind == "other" or f.readonly:
+            self.toasts.show(f"'{f.name}' alanı bu uygulamada düzenlenemez.")
+        else:
+            self._open_form_editor(f)
+
+    def _open_form_editor(self, f):
+        self._finish_form_editor()
+        prect = self.view.page_rect_in_scene(f.page)
+        scene_r = QRectF(prect.x() + f.rect.x0, prect.y() + f.rect.y0, f.rect.width, f.rect.height)
+        vr = self.view.mapFromScene(scene_r).boundingRect()
+        ed = FormFieldEditor(f, self.view.viewport())
+        ed.place(vr)
+        ed.committed.connect(self._on_form_editor_commit)
+        ed.cancelled.connect(self._close_form_editor)
+        self._form_editor = ed
+        ed.start()
+
+    def _close_form_editor(self):
+        ed = getattr(self, "_form_editor", None)
+        self._form_editor = None
+        if ed is not None:
+            ed.hide()
+            ed.deleteLater()
+
+    def _finish_form_editor(self):
+        ed = getattr(self, "_form_editor", None)
+        if ed is not None:
+            ed.finish()
+
+    def _center_on_field(self, f):
+        self.view.centerOn(self.view.page_rect_in_scene(f.page).topLeft()
+                           + QPointF(f.rect.x0 + f.rect.width / 2, f.rect.y0))
+
+    def _on_form_editor_commit(self, f, value, nav):
+        self._close_form_editor()
+        if value != f.value:
+            self._push_form_values({f.name: value})
+        if not nav:
+            return
+        order = [x for x in self._form_fields if x.kind in ("text", "date", "combo") and not x.readonly]
+        if not order:
+            return
+        keys = [(x.page, x.nm) for x in order]
+        i = keys.index((f.page, f.nm)) if (f.page, f.nm) in keys else -1
+        nxt = order[(i + nav) % len(order)]
+        self._goto_form_field(nxt)
+
+    def _goto_form_field(self, f):
+        if f.page != self.active_session.current_page:
+            self.goto_page(f.page)
+        self._center_on_field(f)
+        if f.kind in ("text", "date", "combo") and not f.readonly:
+            QTimer.singleShot(0, lambda: self._open_form_editor(f))
+
+    def _on_form_goto(self, f):
+        if self.state.tool != "select":
+            self._tool_shortcut("select")
+        self._goto_form_field(f)
+
+    def ask_form_field(self, spec, creating=True):
+        """Özellik penceresi; test betikleri bu yöntemi değiştirebilir. spec | None döner."""
+        others = [f for f in self._form_fields if f.nm != spec.get("nm")]
+        names = []
+        for f in others:
+            if f.name not in names:
+                names.append(f.name)
+        groups = sorted({f.name for f in others if f.kind == "radio"})
+        dlg = FormFieldDialog(spec, names, groups, self, creating=creating)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dlg.result_spec()
+
+    def on_form_field_requested(self, page, rect):
+        s = self.active_session
+        if not s:
+            return
+        kind = self.state.form_kind
+        if rect.width() < 6 or rect.height() < 6:
+            w, h = forms.DEFAULT_SIZE[kind]
+            rect = QRectF(rect.x(), rect.y(), w, h)
+        with s.pdf.lock:
+            doc = s.pdf.doc
+            if kind == "radio":
+                group = getattr(self, "_last_radio_group", None)
+                groups = {f.name for f in self._form_fields if f.kind == "radio"}
+                name = group if group in groups else forms.unique_name(doc, forms.KIND_BASE[kind])
+                n = sum(1 for f in self._form_fields if f.name == name) + 1
+                spec = {"name": name, "on_state": f"Secenek{n}"}
+            else:
+                spec = {"name": forms.unique_name(doc, forms.KIND_BASE[kind])}
+        spec.update(kind=kind, rect=(rect.left(), rect.top(), rect.right(), rect.bottom()),
+                    value="", font_size=10)
+        if kind == "combo":
+            spec["options"] = ["Seçenek 1", "Seçenek 2"]
+        if kind == "date":
+            spec["date_fmt"] = forms.DATE_FORMATS[0]
+        if kind == "calc":
+            spec.update(calc_op="SUM", calc_sources=[])
+        if self.state.form_ask or kind == "calc":
+            spec = self.ask_form_field(spec, creating=True)
+            if spec is None:
+                return
+        if kind == "radio":
+            self._last_radio_group = spec["name"]
+        s.undo_stack.push(FormFieldCommand(s, page, None, spec, on_done=self._forms_changed,
+                                           label=f"{forms.KIND_NAMES[kind]} ekle"))
+        self.toasts.show(f"'{spec['name']}' alanı eklendi. Doldurmak için Seç aracıyla tıklayın.")
+
+    def edit_form_field(self, f):
+        s = self.active_session
+        if not s or f is None:
+            return
+        if f.kind == "other":
+            self.toasts.show("Bu alan türünün özellikleri düzenlenemez.")
+            return
+        with s.pdf.lock:
+            old = forms.field_spec(s.pdf.doc, f.page, f.nm)
+        if old is None:
+            return
+        if old["kind"] == "radio":
+            old["value"] = old["on_state"] if f.checked else "Off"
+        new = self.ask_form_field(dict(old), creating=False)
+        if new is None or new == old:
+            return
+        if f.kind == "radio" and new["on_state"] != old["on_state"]:
+            new["value"] = "Off"
+        if new["name"] != old["name"]:
+            users = [c.name for c in self._form_fields if c.kind == "calc" and old["name"] in c.calc_sources]
+            if users:
+                self.toasts.show(f"Not: {', '.join(users)} formülü eski adı ({old['name']}) kullanıyor; "
+                                 "özelliklerinden kaynakları güncelleyin.")
+        s.undo_stack.push(FormFieldCommand(s, f.page, old, new, on_done=self._forms_changed,
+                                           label="Form alanını değiştir"))
+
+    def delete_form_field(self, f):
+        s = self.active_session
+        if not s or f is None:
+            return
+        with s.pdf.lock:
+            old = forms.field_spec(s.pdf.doc, f.page, f.nm)
+        if old is None:
+            return
+        if old["kind"] == "radio":
+            old["value"] = old["on_state"] if f.checked else "Off"
+        s.undo_stack.push(FormFieldCommand(s, f.page, old, None, on_done=self._forms_changed,
+                                           label="Form alanını sil"))
+        self.toasts.show(f"'{f.name}' alanı silindi (Ctrl+Z ile geri alınır).")
+
+    def reset_form(self):
+        s = self.active_session
+        if not s:
+            return
+        if not self._form_fields:
+            self.toasts.show("Bu belgede form alanı yok.")
+            return
+        s.undo_stack.push(FormValuesCommand(s, reset=True, on_done=self._forms_changed,
+                                            label="Formu Sıfırla"))
+        self.toasts.show("Form sıfırlandı (Ctrl+Z ile geri alınır).")
+
+    def recalculate_form(self):
+        s = self.active_session
+        if not s:
+            return
+        with s.pdf.lock:
+            pages = forms.recalculate(s.pdf.doc)
+        if pages:
+            self._mark_dirty()
+            self._forms_changed(pages)
+        self.toasts.show("Hesaplanan alanlar güncel.")
+
+    # -- yazdırma ---------------------------------------------------------------
+    def print_document(self):
+        s = self.active_session
+        if not s:
+            return
+        from PySide6.QtPrintSupport import QPrintDialog, QPrinter
+        self._finish_form_editor()
+        printer = QPrinter(QPrinter.PrinterMode.HighResolution)
+        printer.setDocName(s.title)
+        dlg = QPrintDialog(printer, self)
+        dlg.setWindowTitle("Yazdır")
+        dlg.setOption(QPrintDialog.PrintDialogOption.PrintPageRange, True)
+        dlg.setOption(QPrintDialog.PrintDialogOption.PrintCurrentPage, True)
+        dlg.setMinMax(1, s.pdf.page_count)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        n = self.print_to(printer)
+        if n:
+            self.toasts.show(f"{n} sayfa yazıcıya gönderildi.")
+
+    def print_to(self, printer, pages=None) -> int:
+        """Belgeyi (işaretler ve form değerleriyle) yazıcıya basar; basılan sayfa sayısını döner."""
+        from PySide6.QtGui import QPageLayout, QPainter
+        from PySide6.QtPrintSupport import QPrinter
+        s = self.active_session
+        n = s.pdf.page_count
+        if pages is None:
+            rng = printer.printRange()
+            if rng == QPrinter.PrintRange.PageRange and printer.fromPage() > 0:
+                pages = list(range(printer.fromPage() - 1, min(printer.toPage(), n)))
+            elif rng == QPrinter.PrintRange.CurrentPage:
+                pages = [s.current_page]
+            else:
+                pages = list(range(n))
+        if not pages:
+            return 0
+        tmp = s.pdf._annotated_copy(s.annotations, self.font_ctx)
+        dpi = max(96, min(printer.resolution(), 300))
+        prog = QProgressDialog("Yazdırılıyor…", "İptal", 0, len(pages), self)
+        prog.setWindowTitle("Yazdır")
+        prog.setWindowModality(Qt.WindowModality.WindowModal)
+        prog.setMinimumDuration(400)
+        painter = QPainter()
+        done = 0
+        try:
+            for i, pidx in enumerate(pages):
+                if prog.wasCanceled():
+                    break
+                page = tmp[pidx]
+                landscape = page.rect.width > page.rect.height
+                printer.setPageOrientation(QPageLayout.Orientation.Landscape if landscape
+                                           else QPageLayout.Orientation.Portrait)
+                if i == 0:
+                    if not painter.begin(printer):
+                        raise RuntimeError("Yazıcı başlatılamadı.")
+                else:
+                    printer.newPage()
+                pix = page.get_pixmap(matrix=fitz.Matrix(dpi / 72, dpi / 72), alpha=False)
+                img = QImage(pix.samples, pix.width, pix.height, pix.stride,
+                             QImage.Format.Format_RGB888)
+                area = painter.viewport()
+                sc = min(area.width() / img.width(), area.height() / img.height())
+                w, h = img.width() * sc, img.height() * sc
+                painter.drawImage(QRectF((area.width() - w) / 2, (area.height() - h) / 2, w, h), img)
+                done += 1
+                prog.setValue(i + 1)
+                QApplication.processEvents()
+        except Exception as e:
+            QMessageBox.critical(self, "Yazdır", f"Yazdırma başarısız:\n{e}")
+        finally:
+            if painter.isActive():
+                painter.end()
+            tmp.close()
+            prog.close()
+        return done
+
     def _build_thumbnails(self):
         """Küçük resim listesini anında kurar (boş kâğıt simgeleriyle);
         gerçek görüntüler göründükçe arka planda üretilir."""
+        self._close_form_editor()
+        self._refresh_forms()
         s = self.active_session
         self._thumb_gen += 1
         self.thumb_list.blockSignals(True)

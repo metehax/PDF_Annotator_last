@@ -45,6 +45,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `headfoot.py`    | Sayfa numarası / üstbilgi / altbilgi / Bates motoru (`HeadFootConfig`, `apply_header_footer`) |
 | `ui/pagetools.py`| Üstbilgi/Bates ve sayfa kırpma pencereleri |
 | `ui/comments.py` | Yorumlar paneli (yapışkan notlar, yanıtlar, çözüldü) |
+| `forms.py`       | PDF formları (AcroForm): alanları okuma, doldurma, sıfırlama, hesaplama, alan oluşturma/silme |
+| `ui/formui.py`   | Formlar paneli, alan özellikleri penceresi, sayfa üstündeki alan düzenleyicisi |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
@@ -169,7 +171,7 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 * **Ctrl+K komut paleti:** Yazarak her komuta ulaşın ("döndür", "filigran",
   "ocr", "kalem", "sayfa 12"…). Türkçe karakter yazmanız gerekmez.
 * **Tek harfli araç kısayolları:** V Seç, T Metin, E Metin Düzenle, P Kalem,
-  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, B Bulanıklaştır, I Resim, N Numarala, S Damga, M Not, C Kırp/Yakala.
+  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, B Bulanıklaştır, I Resim, N Numarala, S Damga, M Not, C Kırp/Yakala, F Form Alanı.
   Esc seç aracına döner. Yazı alanlarındayken devreye girmez.
 * **Bildirimler:** Kaydetme vb. sonuçlar köşede kısa bir bildirimle gösterilir
   ("Klasörde göster" bağlantısıyla). Hatalar yine pencere olarak çıkar.
@@ -237,3 +239,27 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   PDF'e gerçek "Not" açıklaması olarak yazılır (yanıtlar içeriğine eklenir), böylece
   başka PDF okuyucularında da görünür; proje (JSON) dosyasına yanıtlarıyla kaydedilir.
   Bu sürümde PDF'in içinde zaten bulunan eski notlar panele alınmaz.
+
+## Yeni: PDF formları
+
+* **Mevcut formu doldurma:** Seç aracıyla (V) bir alana tıklayın. Metin, tarih
+  (takvimli) ve açılır liste alanları sayfanın üstünde açılır; **Enter** kaydeder,
+  **Tab / Shift+Tab** sonraki / önceki alana geçer, **Esc** vazgeçer. Onay kutusu ve
+  radyo düğmesi tek tıkla işaretlenir. Türkçe karakterler (ş, ğ, ı, İ) doğru görünür.
+  Her değişiklik **Ctrl+Z** ile geri alınır; kaydedilen PDF başka okuyucularda da dolu açılır.
+* **Formlar paneli** (sol şerit / Form menüsü): tüm alanlar sayfa sırasıyla adı, türü ve
+  değeriyle listelenir. Çift tıklama alana gider ve düzenler. **Sıfırla** tüm alanları
+  boşaltır (geri alınabilir), **Hesapla** hesaplanan alanları günceller, **Özellikler** ve
+  **Sil** seçili alan içindir. "Alanları vurgula" alanları açık maviyle gösterir (yalnızca ekranda).
+* **Kendi formunu oluşturma — Form Alanı aracı (F):** Özellik çubuğundan alan türünü seçin,
+  sayfada bir kutu çizin (onay/radyo için tıklamak yeter). Türler: **metin alanı**, **onay
+  kutusu**, **radyo düğmesi** (aynı grup adındakilerden yalnızca biri seçilir), **açılır
+  liste** (seçenekler satır satır), **tarih** (gg.aa.yyyy vb.) ve **hesaplanan alan**
+  (seçilen alanların toplamı, çarpımı, ortalaması, en küçüğü ya da en büyüğü; "1.234,5" ve
+  "2,5" gibi yazımları anlar). Mevcut bir alana Form Alanı aracıyla tıklamak özelliklerini açar.
+  Alanlar Acrobat uyumlu yazılır: tarih ve hesaplama betikleri diğer okuyucularda da çalışır.
+* **Yazdır (Ctrl+P):** Windows yazdırma penceresi; tüm sayfalar, sayfa aralığı ya da geçerli
+  sayfa. Çıktıya işaretler ve form değerleri dahildir; yatay sayfalar yatay basılır.
+* Sınırlamalar: imza ve düğme alanları listelenir ama düzenlenmez; çok satırlı alanlarda
+  Türkçe karakterli metin basit sözcük kaydırmayla çizilir; proje (JSON) dosyası form
+  değerlerini taşımaz — değerler PDF olarak kaydedilince korunur.
