@@ -1,0 +1,3 @@
+OCR için tur.traineddata ve eng.traineddata dosyalarını bu klasöre koyun
+(github.com/tesseract-ocr/tessdata_fast). Tesseract'ı sistem genelinde
+kurduysanız (UB Mannheim, Turkish seçili) bu adım gerekmez.
