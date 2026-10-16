@@ -218,6 +218,12 @@ QCheckBox::indicator {{ width:16px; height:16px; border-radius:5px;
 QCheckBox::indicator:hover {{ border-color:{t['accent']}; }}
 QCheckBox::indicator:checked {{ background:{t['accent']}; border-color:{t['accent']};
     image:url("{check}"); }}
+QRadioButton::indicator {{ width:16px; height:16px; border-radius:9px;
+    border:1px solid {t['border_strong']}; background:{t['surface2']}; }}
+QRadioButton::indicator:hover {{ border-color:{t['accent']}; }}
+QRadioButton::indicator:checked {{ border-color:{t['accent']};
+    background:qradialgradient(cx:.5, cy:.5, radius:.5, fx:.5, fy:.5, stop:0 {t['accent']}, stop:.42 {t['accent']},
+    stop:.47 {t['surface2']}, stop:1 {t['surface2']}); }}
 
 QSlider {{ background:transparent; }}
 QSlider::groove:horizontal {{ height:4px; background:{t['border_strong']}; border-radius:2px; }}

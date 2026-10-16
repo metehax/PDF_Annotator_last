@@ -15,10 +15,11 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 | `headfoot.py` | Sayfa numarası/üstbilgi/altbilgi/Bates motoru (`export_pdf(..., headfoot=cfg)`) |
 | `forms.py` | AcroForm: `list_fields`, `set_value/apply_values/snapshot_values`, `reset_values`, `recalculate`, `add_field/field_spec/delete_field` |
 | `digisign.py` | pyhanko: `sign_pdf` (artımlı; alan/yeni kutu/görünmez), `verify_pdf` → `SigReport`, `create_self_signed` |
+| `workflow.py` | Görsel iş akışı çekirdeği (arayüzsüz): `STEP_TYPES` (ocr/rotate/watermark/headfoot/kvkk/compress/password/save), `Workflow`/`Step`, `WorkflowLibrary` (QSettings'te JSON şablon + hazır şablonlar), `run_file`/`run_batch`/`collect_files`, `BatchReport` |
 | `ocr.py`, `fonts.py`, `gizmo.py` | OCR (Tesseract, `tessdata/`), yazı tipleri, boyutlandırma kulpları |
 | `ui/theme.py` | Renk belirteçleri (`current()`, `qcolor()`), QSS — yeni objectName stillerini buraya ekle |
 | `ui/icons.py` | Kendi SVG ikon seti: `icon(name, role)`; yeni ikon = `_PATHS`'e 24×24 çizgi SVG |
-| `ui/*.py` | overlays, sidepanel, welcome, toast, palette, kvkk, stamps, docdialogs, widgets, pagetools (üstbilgi/Bates + sayfa kırpma), comments (Yorumlar paneli + `ask_note_text`), signatures (`SignatureLibrary`, imza/dijital imza/rapor pencereleri), formui (Formlar paneli, `FormFieldDialog`, satır içi `FormFieldEditor`) |
+| `ui/*.py` | overlays, sidepanel, welcome, toast, palette, kvkk, stamps, docdialogs, widgets, pagetools (üstbilgi/Bates + sayfa kırpma), comments (Yorumlar paneli + `ask_note_text`), signatures (`SignatureLibrary`, imza/dijital imza/rapor pencereleri), formui (Formlar paneli, `FormFieldDialog`, satır içi `FormFieldEditor`), workflow (`WorkflowDialog`: palet + sürüklenebilir zincir + `ParamForm` + şablon + hedef + ilerleme/rapor) |
 
 ## Kurallar
 - Yeni eylem: `_build_menus()` içinde `A(menu, ikon, "Metin", slot, "Kısayol")` — komut paletine (Ctrl+K) otomatik girer.
@@ -41,6 +42,10 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
   Testte `mw.ask_signature`, `mw.ask_digital_sign`, `mw.show_report` sahtelenir; `w.sig_lib.settings` da
   geçici ayara bağlanıp `load()` çağrılır. Değişmemiş PDF özgün dosyadan artımlı, değilse geçici dışa aktarımdan imzalanır.
 - Testte özellik penceresi yerine `mw.ask_form_field` sahte fonksiyonla; yazdırma `mw.print_to(QPrinter PdfFormat)`.
+- İş akışı: yeni adım = `workflow.STEP_TYPES`'a `StepType` (+`Param` şeması; arayüz formu şemadan üretilir, ayrıca arayüz kodu gerekmez) ve `STEP_ORDER`'a anahtar. Sayfaları değiştiren adım `_PAGE`, kaydederken uygulanan `_FINAL` (sona alınır). Adım `StepError` fırlatırsa dosya 'hata' olur, toplu iş sürer; uzun döngülerde `ctx.check()` + `ctx.inner(oran, ileti)` çağır (durdurma/ilerleme).
+- İş akışı çıktısı geçici dosya + `os.replace`; Windows'ta açık dosyanın üstüne taşınmaz → özgün belge `save` öncesi kapatılır. Açık belge `Source(protect_original=True)` ile işlenir (işaretli kopya bayt olarak), üstüne yazma kapalıdır.
+- Parola adımında `ask=True` iken parola şablona/ayara yazılmaz; `run_batch(..., overrides={'user_password': ...})` ile gelir. Testte `dlg.ask_passwords`, `dlg.ask_name` sahtelenir (exec bloklar).
+- Görünür bir pencereye sonradan eklenen widget'a `show()` çağır (aksi halde panel boş kalır; `ParamForm` böyle yakalandı).
 - Heredoc ile `'''` içeren betik yazma (araç ayrıştırması bozuluyor): betiği Write ile dosyaya yaz, sonra çalıştır.
 
 ## Test
@@ -49,10 +54,11 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
   `w.stamp_lib.settings = w.settings` (+ `w.sig_lib`) — yoksa kullanıcının gerçek ayarları (son açılanlar) kirlenir.
 - Lint: `pip install pyflakes` → `python -m pyflakes ...` → işi bitince `pip uninstall -y pyflakes`.
 - Ekran görüntüsünü yalnızca aşama sonunda bir kez al (maliyet).
+- `.venv` başka bilgisayardan (OneDrive) gelmişse çalışmaz (pyvenv.cfg başka kullanıcı yolu): repoya dokunmadan geçici klasörde `py -3.12 -m venv` + `pip install -r requirements.txt pyflakes` ile test ortamı kur. Çıktı borulanırsa `python -u` kullan (`os._exit` tamponu yutar).
 
 ## Yol haritası (kalan)
 B tamam (sayfa no/üstbilgi/Bates, sayfa kırpma, bulanıklaştırma, yapışkan not + yorumlar) ·
 C1 tamam (form doldurma/sıfırlama/oluşturma, hesaplanan alan, Ctrl+P yazdırma) ·
-C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğrulama) · E: görsel iş akışı + toplu işlem ·
+C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğrulama) · E tamam (görsel iş akışı: adım zinciri + şablon + açık belge/dosyalar/klasör, ilerleme/durdurma/rapor) ·
 F: QR ile telefondan dosya alma (yerel ağ, segno) · D: sürüm karşılaştırma, Word/Excel (pdf2docx, openpyxl),
 erişilebilirlik denetimi. Onaylı yeni paketler: segno, pdf2docx, openpyxl (`requirements.txt`'e ekle).

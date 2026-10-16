@@ -64,6 +64,7 @@ from ui.comments import CommentsPanel, ask_note_text
 import forms
 from ui.formui import FormFieldDialog, FormFieldEditor, FormsPanel
 from ui.kvkk import KvkkDialog
+from ui.workflow import WorkflowDialog
 from ui.pagetools import CropPagesDialog, HeadFootDialog
 from ui.palette import Command, CommandPalette
 from ui.signatures import DigitalSignDialog, ReportDialog, SignatureDialog, SignatureLibrary, report_html
@@ -914,6 +915,8 @@ class MainWindow(QMainWindow):
         A(m_doc, "shield", "Güvenlik denetimi…", self.open_security_check)
         A(m_doc, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
         A(m_doc, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
+        m_doc.addSeparator()
+        A(m_doc, "workflow", "Görsel iş akışı (adım zinciri)…", self.open_workflow, "Ctrl+Shift+W", needs_doc=False)
 
         m_form = QMenu("Form", self)
         A(m_form, "form", "Formlar paneli", lambda: self.side.show_page("forms"))
@@ -3734,6 +3737,17 @@ class MainWindow(QMainWindow):
             return
         self._kvkk_dialog = KvkkDialog(self, s)
         self._kvkk_dialog.show()
+
+    # -- Görsel iş akışı ---------------------------------------------------------
+    def open_workflow(self):
+        """Adım zinciri penceresi (tek örnek); belge açık olmasa da dosya/klasör için kullanılabilir."""
+        dlg = getattr(self, "_workflow_dialog", None)
+        if dlg is None:
+            dlg = self._workflow_dialog = WorkflowDialog(self)
+        dlg.show()
+        dlg.raise_()
+        dlg.activateWindow()
+        return dlg
 
     def on_number_requested(self, scene_pt: QPointF):
         s = self.active_session
