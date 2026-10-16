@@ -344,6 +344,23 @@ QPushButton#recentItem:hover {{ background:{t['hover']}; border-color:{t['accent
 #dropOverlay {{ background:{t['accent_soft']}; border:3px dashed {t['accent']}; border-radius:18px;
     color:{t['accent_text']}; font-size:22px; font-weight:600; }}
 
+/* ---- bildirimler, komut paleti -------------------------------------------- */
+#toast {{ background:{t['surface']}; border:1px solid {t['border_strong']}; border-radius:12px; }}
+#toast[kind="success"] {{ border-left:3px solid {t['accent']}; }}
+#toast[kind="warning"] {{ border-left:3px solid {t['warning']}; }}
+#toast[kind="error"] {{ border-left:3px solid {t['danger']}; }}
+#toastText {{ color:{t['text']}; }}
+QPushButton#toastAction {{ color:{t['accent_text']}; font-weight:600; padding:4px 8px; }}
+#palette {{ background:{t['surface']}; border:1px solid {t['border_strong']}; border-radius:14px; }}
+QLineEdit#paletteEdit {{ font-size:15px; padding:9px 10px; border-radius:10px; }}
+QListWidget#paletteList {{ background:transparent; }}
+QListWidget#paletteList::item {{ padding:0; border-radius:8px; }}
+QListWidget#paletteList::item:selected {{ background:{t['accent_soft']}; }}
+#paletteTitle {{ color:{t['text']}; }}
+#paletteCat {{ color:{t['text_faint']}; font-size:12px; }}
+#kbd {{ color:{t['text_muted']}; background:{t['surface2']}; border:1px solid {t['border']};
+    border-radius:5px; padding:1px 6px; font-size:11px; }}
+
 /* ---- kaydırma çubukları (ince, modern) -------------------------------- */
 QScrollBar:vertical {{ background:transparent; width:10px; margin:2px; }}
 QScrollBar:horizontal {{ background:transparent; height:10px; margin:2px; }}

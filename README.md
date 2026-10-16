@@ -36,6 +36,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/overlays.py` | Çalışma alanında yüzen gölgeli çubuklar (araç kapsülü, özellik/seçim/sayfa çubukları) |
 | `ui/sidepanel.py`| Sol ikon şeridi + animasyonla açılıp kapanan panel |
 | `ui/welcome.py`  | Açılış ekranı: sürükle-bırak alanı, son açılan dosyalar |
+| `ui/toast.py`    | Köşede beliren ve kendiliğinden kaybolan bildirimler |
+| `ui/palette.py`  | Ctrl+K komut paleti (Türkçe karakterlere duyarsız arama) |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
 
@@ -153,3 +155,21 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 * **Açılış ekranı ve sürükle-bırak:** Dosyaları pencereye bırakmak yeterli;
   son açılanlar hem açılış ekranında hem Dosya menüsünde listelenir.
 * Klavye kısayollarının tamamı: Yardım → Klavye kısayolları (F1).
+
+## Yeni: Hızlı kullanım
+
+* **Ctrl+K komut paleti:** Yazarak her komuta ulaşın ("döndür", "filigran",
+  "ocr", "kalem", "sayfa 12"…). Türkçe karakter yazmanız gerekmez.
+* **Tek harfli araç kısayolları:** V Seç, T Metin, E Metin Düzenle, P Kalem,
+  H Fosforlu, L Çizgi, R Dörtgen, O Oval, X Gizle, I Resim, N Numarala, C Kırp.
+  Esc seç aracına döner. Yazı alanlarındayken devreye girmez.
+* **Bildirimler:** Kaydetme vb. sonuçlar köşede kısa bir bildirimle gösterilir
+  ("Klasörde göster" bağlantısıyla). Hatalar yine pencere olarak çıkar.
+* **Kaydedilmemiş değişiklikler:** Sekme adında `●` görünür; sekme ya da
+  uygulama kapatılırken Kaydet / Kaydetme / İptal sorulur. PDF, resim ya da
+  proje olarak kaydetmek belgeyi "kaydedildi" sayar.
+* **Birlikte aç:** `main_window.py dosya.pdf` ile açılabilir; uygulama açıkken
+  yeni dosyalar mevcut pencereye gönderilir. Yardım menüsündeki
+  "Windows'ta 'Birlikte aç' listesine ekle" yalnızca kullanıcı hesabınız için
+  kayıt yapar (HKCU), varsayılan uygulamanızı değiştirmez; aynı menüden kaldırılabilir.
+* Pencere boyutu/konumu ve kenar paneli durumu bir sonraki açılışta hatırlanır.

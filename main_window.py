@@ -14,6 +14,7 @@ from __future__ import annotations
 
 import copy
 import os
+import sys
 from typing import Dict, List, Optional, Tuple
 
 import pymupdf as fitz
@@ -23,7 +24,7 @@ from PySide6.QtCore import (
     QUrl, Signal,
 )
 from PySide6.QtGui import (
-    QAction, QColor, QDesktopServices, QFont, QImage, QIntValidator, QKeySequence, QPixmap,
+    QAction, QColor, QDesktopServices, QFont, QImage, QIntValidator, QKeySequence, QPixmap, QShortcut,
     QUndoGroup,
 )
 from PySide6.QtWidgets import (
@@ -55,6 +56,8 @@ from fonts import FONT_FAMILIES, register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon, pixmap as icon_pixmap
 from ui.overlays import FloatingBar
+from ui.palette import Command, CommandPalette
+from ui.toast import ToastManager
 from ui.sidepanel import SidePanel
 from ui.welcome import WelcomeScreen
 from ui.widgets import THUMB_ASPECT_ROLE, THUMB_ROLE, ThumbnailDelegate
@@ -85,6 +88,10 @@ TOOLS = [
     ("crop", "Kırp / Yakala", "crop", "Bir alanı görsel olarak yakala"),
 ]
 TOOL_NAMES = {t[0]: t[1] for t in TOOLS if t}
+# Tek harfli araç kısayolları (yazı yazılan alanlarda devreye girmez)
+TOOL_KEYS = {"select": "V", "text": "T", "edit": "E", "ink": "P", "highlight": "H", "line": "L",
+             "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "crop": "C"}
+APP_ID = "PDFAnnotator.Belge"
 
 
 # ---------------------------------------------------------------------------
@@ -371,7 +378,7 @@ class OcrDialog(QDialog):
         def done(ok):
             if ok:
                 self._main.status.setText(f"Aranabilir PDF kaydedildi: {path}")
-                QMessageBox.information(self, "Tamam", f"Aranabilir PDF kaydedildi:\n{path}")
+                self._main._toast_saved("Aranabilir PDF kaydedildi", path)
             else:
                 self._main.status.setText("OCR durduruldu; dosya yazılmadı.")
 
@@ -585,6 +592,11 @@ class MainWindow(QMainWindow):
 
         self._build_ui()
         self._apply_style()
+        geo = self.settings.value("geometry")
+        if geo is not None:
+            self.restoreGeometry(geo)
+        if str(self.settings.value("sidePanelOpen", "true")).lower() == "false":
+            self._side_was_open = False
         self._set_ui_enabled(False)
         self._select_tool("select", self.btn_select)
 
@@ -634,6 +646,9 @@ class MainWindow(QMainWindow):
         self._drop_overlay.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self._drop_overlay.hide()
         self.setAcceptDrops(True)
+
+        self.toasts = ToastManager(self.workspace)
+        self.palette = CommandPalette(central, self._palette_commands)
 
         self._build_shortcuts()
         self._refresh_recent()
@@ -832,6 +847,7 @@ class MainWindow(QMainWindow):
         A(m_edit, "trash", "Seçileni sil", self.delete_selected, QKeySequence.StandardKey.Delete)
         m_edit.addSeparator()
         A(m_edit, "search", "Bul…", self._focus_search, "Ctrl+F")
+        A(m_edit, "sliders", "Komut paleti…", self.open_palette, "Ctrl+K", needs_doc=False)
 
         m_view = QMenu("Görünüm", self)
         A(m_view, "zoom_in", "Yakınlaştır", lambda: self.view.animate_zoom(self.view.zoom() * 1.25), "Ctrl+=")
@@ -861,6 +877,12 @@ class MainWindow(QMainWindow):
 
         m_help = QMenu("Yardım", self)
         A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
+        m_help.addSeparator()
+        A(m_help, "file", "Windows'ta 'Birlikte aç' listesine ekle…", self._register_open_with,
+          needs_doc=False)
+        A(m_help, "close", "'Birlikte aç' listesinden kaldır", self._unregister_open_with,
+          needs_doc=False)
+        m_help.addSeparator()
         A(m_help, "app", "Hakkında", self._show_about, needs_doc=False)
 
         # sağ üstteki "Dışa Aktar" düğmesinin menüsü
@@ -881,8 +903,9 @@ class MainWindow(QMainWindow):
                 continue
             icon_name, text, slot = entry
             self.export_menu.addAction(icon(icon_name), text, slot)
-        return [("Dosya", m_file), ("Düzenle", m_edit), ("Görünüm", m_view),
-                ("Belge", m_doc), ("Yardım", m_help)]
+        self._menus = [("Dosya", m_file), ("Düzenle", m_edit), ("Görünüm", m_view),
+                       ("Belge", m_doc), ("Yardım", m_help)]
+        return self._menus
 
     # -- üst çubuk ----------------------------------------------------------
     def _build_top_bar(self):
@@ -1081,13 +1104,14 @@ class MainWindow(QMainWindow):
                 self._tool_buttons.append((key, self.btn_shape))
                 continue
             if key == "rect":
-                b = self.capsule.add_button("rect", "<b>Şekil</b><br>Dörtgen ya da oval çiz",
+                b = self.capsule.add_button("rect", "<b>Şekil</b> &nbsp;R / O<br>Dörtgen ya da oval çiz",
                                             checkable=True, size=36, icon_size=20,
                                             object_name="toolbtn")
                 b.clicked.connect(lambda _=False, b=b: self._select_tool(self._last_shape, b))
                 self.btn_shape = b
             else:
-                b = self.capsule.add_button(icon_name, f"<b>{label}</b><br>{desc}", checkable=True,
+                b = self.capsule.add_button(icon_name, f"<b>{label}</b> &nbsp;{TOOL_KEYS[key]}<br>{desc}",
+                                            checkable=True,
                                             size=36, icon_size=20, object_name="toolbtn")
                 b.clicked.connect(lambda _=False, k=key, b=b: self._select_tool(k, b))
             self._tool_buttons.append((key, b))
@@ -1132,6 +1156,9 @@ class MainWindow(QMainWindow):
 
         self.status = QLabel("Başlamak için bir dosya açın ya da pencereye sürükleyin.")
         self.status.setObjectName("status")
+        # uzun yollar sağdaki kontrolleri itmesin: sığmayan kısım kırpılır
+        self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
+        self.status.setMinimumWidth(0)
         h.addWidget(self.status, 1)
 
         self.btn_prev = self._icon_button(
@@ -1423,6 +1450,11 @@ class MainWindow(QMainWindow):
             a.triggered.connect(fn)
             self.addAction(a)
 
+        for key, letter in TOOL_KEYS.items():
+            sc = QShortcut(QKeySequence(letter), self)
+            sc.activated.connect(lambda k=key: self._tool_shortcut(k))
+        esc = QShortcut(QKeySequence(Qt.Key.Key_Escape), self)
+        esc.activated.connect(self._on_escape)
         act("Right", lambda: self.goto_page(self.active_session.current_page + 1)
             if self.active_session else None)
         act("Left", lambda: self.goto_page(self.active_session.current_page - 1)
@@ -1482,6 +1514,8 @@ class MainWindow(QMainWindow):
         et = ev.type()
         if obj is self.workspace and et == QEvent.Type.Resize:
             self._layout_overlays()
+            if hasattr(self, "toasts"):
+                self.toasts.relayout()
         elif obj is self.page_bar and et == QEvent.Type.Leave:
             self._page_bar_timer.start()
         return super().eventFilter(obj, ev)
@@ -1490,6 +1524,8 @@ class MainWindow(QMainWindow):
         super().resizeEvent(e)
         if self._drop_overlay.isVisible():
             self._drop_overlay.setGeometry(self.centralWidget().rect())
+        if self.palette.isVisible():
+            self.palette.reposition()
 
     def _layout_overlays(self):
         if not hasattr(self, "capsule"):
@@ -1530,6 +1566,13 @@ class MainWindow(QMainWindow):
 
     def _place_floating(self):
         if not hasattr(self, "sel_bar"):
+            return
+        if self._sel_ann is None and self._hover_page < 0:
+            # kaydırma sırasında sık çağrılır: gösterilecek bir şey yoksa hemen çık
+            if self.sel_bar.isVisible():
+                self.sel_bar.hide()
+            if self.page_bar.isVisible():
+                self.page_bar.hide()
             return
         top_limit = CANVAS_TOP_INSET + 8
         if self.prop_bar.isVisible():
@@ -1597,6 +1640,168 @@ class MainWindow(QMainWindow):
             return
         self._hover_page = -1
         self.page_bar.hide()
+
+    def _toast_saved(self, text, path, folder=False):
+        target = path if folder else os.path.dirname(os.path.abspath(path))
+
+        def reveal():
+            if not folder and sys.platform == "win32":
+                import subprocess
+                subprocess.Popen(["explorer", "/select,", os.path.normpath(path)])
+            else:
+                QDesktopServices.openUrl(QUrl.fromLocalFile(target))
+
+        self.toasts.show(f"{text}<br><span style='color:gray'>{os.path.basename(path) or path}</span>",
+                         "success", action=("Klasörde göster", reveal))
+
+    # -- araç kısayolları / komut paleti ----------------------------------------
+    def _tool_shortcut(self, key):
+        if not self.active_session or self.palette.isVisible():
+            return
+        if self.act_compare.isChecked() and key != "number":
+            return
+        self._select_tool(key, dict(self._tool_buttons)[key])
+
+    def _on_escape(self):
+        if self.palette.isVisible():
+            self.palette.close_palette()
+            return
+        if not self.active_session:
+            return
+        self.view.scene_obj.clearSelection()
+        if self.state.tool != "select" and not self.act_compare.isChecked():
+            self._select_tool("select", self.btn_select)
+
+    def open_palette(self):
+        self.palette.open()
+
+    def _palette_commands(self, query):
+        cmds = []
+        s = self.active_session
+        q = query.strip().lower()
+        digits = "".join(ch for ch in q if ch.isdigit())
+        if s and digits and (q.isdigit() or q.startswith(("sayfa", "s ", "p "))):
+            n = int(digits)
+            if 1 <= n <= s.pdf.page_count:
+                cmds.append(Command(f"Sayfaya git: {n}", lambda n=n: self.goto_page(n - 1),
+                                    "Gezinme", "chevron_right"))
+        if s:
+            for entry in TOOLS:
+                if entry is None:
+                    continue
+                key, label, icon_name, _desc = entry
+                if self.act_compare.isChecked() and key != "number":
+                    continue
+                cmds.append(Command(f"{label} aracı", lambda k=key: self._tool_shortcut(k), "Araç",
+                                    icon_name, TOOL_KEYS[key]))
+            for key, title, icon_name in (("pages", "Sayfalar", "grid"), ("toc", "İçindekiler", "list"),
+                                          ("search", "Ara", "search"), ("layers", "İşaretler", "layers")):
+                cmds.append(Command(f"{title} panelini göster", lambda k=key: self.side.show_page(k),
+                                    "Panel", icon_name))
+
+        def walk(menu, prefix):
+            for a in menu.actions():
+                if a.isSeparator():
+                    continue
+                sub = a.menu()
+                if sub is not None:
+                    if sub is self.recent_menu:
+                        continue
+                    walk(sub, a.text())
+                    continue
+                if not a.isEnabled() or not a.text():
+                    continue
+                text = a.text().replace("&", "").rstrip("…").strip()
+                if a.isCheckable():
+                    text += " (açık)" if a.isChecked() else ""
+                cmds.append(Command(text, a.trigger, prefix, None,
+                                    a.shortcut().toString(QKeySequence.SequenceFormat.NativeText),
+                                    qicon=a.icon()))
+
+        for title, menu in self._menus:
+            walk(menu, title)
+        for p in self._recent_paths()[:RECENT_MAX]:
+            if os.path.exists(p):
+                cmds.append(Command(f"Aç: {os.path.basename(p)}", lambda p=p: self.open_paths([p]),
+                                    "Son açılanlar", "file" if p.lower().endswith(".pdf") else "image"))
+        return cmds
+
+    # -- Windows "Birlikte aç" kaydı ---------------------------------------------
+    @staticmethod
+    def _launcher():
+        exe = sys.executable
+        if os.path.basename(exe).lower() == "python.exe":
+            cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
+            if os.path.exists(cand):
+                exe = cand
+        return exe, os.path.abspath(__file__)
+
+    def _register_open_with(self):
+        if sys.platform != "win32":
+            self.toasts.show("Bu özellik yalnızca Windows'ta kullanılabilir.", "info")
+            return
+        exts = [".pdf"] + list(IMAGE_EXTS)
+        ret = QMessageBox.question(
+            self, "'Birlikte aç' listesine ekle",
+            "PDF ve resim dosyalarına sağ tıklayıp <b>Birlikte aç</b> dediğinizde bu uygulama "
+            "da listede görünsün mü?<br><br>Yalnızca sizin kullanıcı hesabınız için kayıt yapılır "
+            "(yönetici izni gerekmez); varsayılan uygulamanız değişmez.<br>"
+            f"<span style='color:gray'>Dosya türleri: {', '.join(exts)}</span>")
+        if ret != QMessageBox.StandardButton.Yes:
+            return
+        import winreg
+        exe, script = self._launcher()
+        base = r"Software\Classes"
+        try:
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}") as k:
+                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, "PDF İşaretleme Aracı belgesi")
+                winreg.SetValueEx(k, "FriendlyTypeName", 0, winreg.REG_SZ, "PDF İşaretleme Aracı belgesi")
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}\DefaultIcon") as k:
+                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, f"{exe},0")
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}\shell\open") as k:
+                winreg.SetValueEx(k, "FriendlyAppName", 0, winreg.REG_SZ, "PDF İşaretleme Aracı")
+            with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}\shell\open\command") as k:
+                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, f'"{exe}" "{script}" "%1"')
+            for ext in exts:
+                with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{ext}\OpenWithProgids") as k:
+                    winreg.SetValueEx(k, APP_ID, 0, winreg.REG_NONE, b"")
+            import ctypes
+            ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+            self.toasts.show("'Birlikte aç' listesine eklendi. Bir dosyaya sağ tıklayıp deneyebilirsiniz.",
+                             "success", timeout_ms=5000)
+        except OSError as ex:
+            QMessageBox.critical(self, "Hata", f"Kayıt yapılamadı:\n{ex}")
+
+    def _unregister_open_with(self):
+        if sys.platform != "win32":
+            return
+        import winreg
+        base = r"Software\Classes"
+
+        def delete_tree(root, path):
+            try:
+                with winreg.OpenKey(root, path, 0, winreg.KEY_ALL_ACCESS) as k:
+                    while True:
+                        try:
+                            sub = winreg.EnumKey(k, 0)
+                        except OSError:
+                            break
+                        delete_tree(root, path + "\\" + sub)
+                winreg.DeleteKey(root, path)
+            except FileNotFoundError:
+                pass
+
+        delete_tree(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}")
+        for ext in [".pdf"] + list(IMAGE_EXTS):
+            try:
+                with winreg.OpenKey(winreg.HKEY_CURRENT_USER, rf"{base}\{ext}\OpenWithProgids", 0,
+                                    winreg.KEY_SET_VALUE) as k:
+                    winreg.DeleteValue(k, APP_ID)
+            except FileNotFoundError:
+                pass
+        import ctypes
+        ctypes.windll.shell32.SHChangeNotify(0x08000000, 0, None, None)
+        self.toasts.show("'Birlikte aç' listesinden kaldırıldı.", "info")
 
     def _update_page_label(self, index, count):
         self.page_edit.setText(str(index + 1) if count else "")
@@ -1687,6 +1892,9 @@ class MainWindow(QMainWindow):
             ("Ctrl + tekerlek", "Yakınlaştır / uzaklaştır"), ("Ctrl+= / Ctrl+-", "Yakınlaştır / uzaklaştır"),
             ("Ctrl+0 / Ctrl+1 / Ctrl+2", "Tam sayfa / %100 / Genişliğe sığdır"),
             ("Boşluk + sürükle", "Sayfayı kaydır"), ("Orta tuş + sürükle", "Sayfayı kaydır"),
+            ("Ctrl+K", "Komut paleti"), ("Esc", "Seç aracına dön / seçimi kaldır"),
+            ("V T E P H L R O X I N C", "Araçlar: Seç, Metin, Metin Düzenle, Kalem, Fosforlu, Çizgi, "
+                                        "Dörtgen, Oval, Gizle, Resim, Numarala, Kırp"),
             ("Home / End", "İlk / son sayfa"), ("PgUp / PgDn", "Ekran ekran kaydır"),
             ("← / →", "Önceki / sonraki sayfa"), ("Ctrl+R / Ctrl+Shift+R", "Sayfayı döndür"),
         ]
@@ -1744,6 +1952,7 @@ class MainWindow(QMainWindow):
     def _open_path_as_session(self, path):
         pdf = PDFDocument(path)
         session = DocumentSession(pdf, path)
+        session.undo_stack.cleanChanged.connect(lambda _c: self.refresh_doc_tabs())
         self._add_recent(path)
         self.undo_group.addStack(session.undo_stack)
         self.sessions.append(session)
@@ -1760,8 +1969,13 @@ class MainWindow(QMainWindow):
         while self.doc_tabbar.count():
             self.doc_tabbar.removeTab(0)
         for s in self.sessions:
-            i = self.doc_tabbar.addTab(s.title)
-            self.doc_tabbar.setTabToolTip(i, s.path)
+            i = self.doc_tabbar.addTab(("● " if self._is_dirty(s) else "") + s.title)
+            self.doc_tabbar.setTabToolTip(i, s.path + ("\nKaydedilmemiş değişiklikler var" if self._is_dirty(s) else ""))
+        if self.active_session is not None:
+            mark = "● " if self._is_dirty(self.active_session) else ""
+            self.setWindowTitle(f"{mark}{self.active_session.title} — PDF İşaretleme Aracı")
+        else:
+            self.setWindowTitle("PDF İşaretleme Aracı")
         if self.active_session in self.sessions:
             self.doc_tabbar.setCurrentIndex(self.sessions.index(self.active_session))
         self.doc_tabbar.blockSignals(False)
@@ -1788,7 +2002,7 @@ class MainWindow(QMainWindow):
                 session.title = new_name.strip()
                 self.refresh_doc_tabs()
                 if session is self.active_session:
-                    self.setWindowTitle(f"PDF İşaretleme Aracı — {session.title}")
+                    self.refresh_doc_tabs()
         elif chosen == act_copy:
             QApplication.clipboard().setText(session.path)
             self.status.setText("Dosya yolu panoya kopyalandı.")
@@ -1805,15 +2019,58 @@ class MainWindow(QMainWindow):
         self._build_thumbnails()
         self._build_toc()
         self.goto_page(self.active_session.current_page)
-        self.setWindowTitle(f"PDF İşaretleme Aracı — {self.active_session.title}")
+        self.refresh_doc_tabs()
         self._refresh_number_label()
         self.refresh_doc_tabs()
         if hasattr(self, "pane_left"):
             self.pane_left.refresh_sessions()
             self.pane_right.refresh_sessions()
 
-    def close_session(self, idx):
+    @staticmethod
+    def _is_dirty(s):
+        return bool(s.dirty) or not s.undo_stack.isClean()
+
+    def _mark_dirty(self, s=None):
+        s = s or self.active_session
+        if s is not None:
+            s.dirty = True
+            self.refresh_doc_tabs()
+
+    def _mark_saved(self, s=None):
+        s = s or self.active_session
+        if s is not None:
+            s.dirty = False
+            s.undo_stack.setClean()
+            self.refresh_doc_tabs()
+
+    def _confirm_discard(self, s) -> bool:
+        """Kaydedilmemiş değişiklik varsa sorar. Devam edilebilirse True."""
+        if not self._is_dirty(s):
+            return True
+        if s is not self.active_session and s in self.sessions:
+            self.switch_session(self.sessions.index(s))
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Kaydedilmemiş değişiklikler")
+        box.setText(f"<b>{s.title}</b> belgesindeki değişiklikler kaydedilsin mi?")
+        box.setInformativeText("Kaydetmezseniz işaretler ve sayfa değişiklikleri kaybolur.")
+        btn_save = box.addButton("Kaydet", QMessageBox.ButtonRole.AcceptRole)
+        btn_discard = box.addButton("Kaydetme", QMessageBox.ButtonRole.DestructiveRole)
+        box.addButton("İptal", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(btn_save)
+        box.exec()
+        clicked = box.clickedButton()
+        if clicked is btn_discard:
+            return True
+        if clicked is btn_save:
+            self.save_document()
+            return not self._is_dirty(s)
+        return False
+
+    def close_session(self, idx, confirm=True):
         if not (0 <= idx < len(self.sessions)):
+            return
+        if confirm and not self._confirm_discard(self.sessions[idx]):
             return
         closing = self.sessions[idx]
         was_active = closing is self.active_session
@@ -1877,7 +2134,9 @@ class MainWindow(QMainWindow):
                     s.pdf.export_image(i, s.annotations.get(i, []), self.font_ctx, out)
                     saved.append(out)
             self.status.setText(f"Kaydedildi: {saved[0]}" + (f" (+{len(saved) - 1})" if len(saved) > 1 else ""))
-            QMessageBox.information(self, "Tamam", "Resim başarıyla kaydedildi.")
+            self._mark_saved(s)
+            self._toast_saved("Resim kaydedildi" if len(saved) == 1 else f"{len(saved)} resim kaydedildi",
+                              saved[0])
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 
@@ -1894,14 +2153,15 @@ class MainWindow(QMainWindow):
         try:
             s.pdf.export_pdf(path, s.annotations, self.font_ctx)
             self.status.setText(f"Kaydedildi: {path}")
-            QMessageBox.information(self, "Tamam", "PDF başarıyla kaydedildi.")
+            self._mark_saved(s)
+            self._toast_saved("PDF kaydedildi", path)
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 
     def open_ocr_dialog(self):
         s = self.active_session
         if not s:
-            QMessageBox.information(self, "OCR", "Önce bir PDF açın.")
+            self.toasts.show("Önce bir belge açın.", "info")
             return
         OcrDialog(self, s, self).exec()
 
@@ -1923,7 +2183,7 @@ class MainWindow(QMainWindow):
         try:
             s.pdf.export_pdf(path, s.annotations, self.font_ctx, watermark=cfg)
             self.status.setText(f"Filigranlı PDF kaydedildi: {path}")
-            QMessageBox.information(self, "Tamam", "Filigranlı PDF başarıyla kaydedildi.")
+            self._toast_saved("Filigranlı PDF kaydedildi", path)
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 
@@ -1957,7 +2217,7 @@ class MainWindow(QMainWindow):
                 out = os.path.join(folder, f"{base}_sayfa{i + 1}.{ext}")
                 s.pdf.export_image(i, s.annotations.get(i, []), self.font_ctx, out)
             self.status.setText(f"Tüm sayfalar dışa aktarıldı: {folder}")
-            QMessageBox.information(self, "Tamam", f"{s.pdf.page_count} sayfa '{folder}' klasörüne kaydedildi.")
+            self._toast_saved(f"{s.pdf.page_count} sayfa dışa aktarıldı", folder, folder=True)
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Dışa aktarılamadı:\n{ex}")
 
@@ -1965,7 +2225,7 @@ class MainWindow(QMainWindow):
         files, _ = QFileDialog.getOpenFileNames(self, "Birleştirilecek PDF / resimleri seçin (sırayla)", "", OPEN_FILTER)
         if len(files) < 2:
             if files:
-                QMessageBox.information(self, "Bilgi", "Birleştirmek için en az 2 PDF seçin.")
+                self.toasts.show("Birleştirmek için en az 2 dosya seçin.", "warning")
             return
         out_path, _ = QFileDialog.getSaveFileName(self, "Birleşik PDF'i Kaydet", "birlesik.pdf", "PDF (*.pdf)")
         if not out_path:
@@ -2005,7 +2265,7 @@ class MainWindow(QMainWindow):
                 single.close()
             annotated.close()
             self.status.setText(f"{s.pdf.page_count} sayfa ayrı PDF olarak kaydedildi: {folder}")
-            QMessageBox.information(self, "Tamam", f"Sayfalar '{folder}' klasörüne kaydedildi.")
+            self._toast_saved("Sayfalar ayrı PDF olarak kaydedildi", folder, folder=True)
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Ayrılamadı:\n{ex}")
 
@@ -2047,6 +2307,8 @@ class MainWindow(QMainWindow):
         try:
             save_project_json(path, s)
             self.status.setText(f"Proje kaydedildi: {path}")
+            self._mark_saved(s)
+            self._toast_saved("Proje kaydedildi", path)
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Proje kaydedilemedi:\n{ex}")
 
@@ -2096,6 +2358,7 @@ class MainWindow(QMainWindow):
         s.pdf.delete_page(idx)
         self._reindex_annotations(s, old_count, lambda order: (order.pop(idx), order)[1])
         s.current_page = min(s.current_page, s.pdf.page_count - 1)
+        self._mark_dirty()
         self._build_thumbnails()
         self.goto_page(s.current_page)
         self.status.setText(f"{idx + 1}. sayfa silindi.")
@@ -2109,6 +2372,7 @@ class MainWindow(QMainWindow):
         idx = max(0, min(idx, old_count))
         s.pdf.insert_blank_page(idx, w, h)
         self._reindex_annotations(s, old_count, lambda order: (order.insert(idx, []), order)[1])
+        self._mark_dirty()
         self._build_thumbnails()
         self.goto_page(idx)
         self.status.setText("Boş sayfa eklendi.")
@@ -2125,6 +2389,7 @@ class MainWindow(QMainWindow):
             return order
 
         self._reindex_annotations(s, old_count, _t)
+        self._mark_dirty()
         self._build_thumbnails()
         self.goto_page(idx + 1)
         self.status.setText("Sayfa kopyalandı.")
@@ -2142,6 +2407,7 @@ class MainWindow(QMainWindow):
             return order
 
         self._reindex_annotations(s, old_count, _t)
+        self._mark_dirty()
         self._build_thumbnails()
         self.goto_page(to)
         self.status.setText("Sayfa taşındı.")
@@ -2166,6 +2432,7 @@ class MainWindow(QMainWindow):
                 return
         s.pdf.rotate_page(idx, delta)
         s.rotations[idx] = s.pdf.page_rotation(idx)
+        self._mark_dirty()
         self._build_thumbnails()
         self.goto_page(idx)
         self.status.setText("Sayfa döndürüldü.")
@@ -2468,7 +2735,6 @@ class MainWindow(QMainWindow):
             self.view.refresh_page(page)
             if page == session.current_page:
                 self.refresh_layers_panel()
-        session.dirty = True
 
     def add_annotation(self, ann):
         s = self.active_session
@@ -2861,7 +3127,7 @@ class MainWindow(QMainWindow):
         elif chosen == act_clip:
             img = QApplication.clipboard().image()
             if img.isNull():
-                QMessageBox.information(self, "Bilgi", "Panoda bir görsel bulunamadı.")
+                self.toasts.show("Panoda bir görsel bulunamadı.", "warning")
                 return
             image_bytes = qimage_to_png_bytes(img)
         else:
@@ -3048,14 +3314,84 @@ class MainWindow(QMainWindow):
     # Kapatma
     # =====================================================================
     def closeEvent(self, event):
+        for s in list(self.sessions):
+            if not self._confirm_discard(s):
+                event.ignore()
+                return
+        self.settings.setValue("geometry", self.saveGeometry())
+        self.settings.setValue("sidePanelOpen", self.side.is_open() or not self.sessions and self._side_was_open)
         for s in self.sessions:
             s.close()
         super().closeEvent(event)
 
 
+def _send_to_running_instance(paths) -> bool:
+    """Uygulama zaten açıksa dosyaları ona gönderir ("Birlikte aç" ile ikinci
+    pencere açılmasın). Gönderildiyse True."""
+    from PySide6.QtNetwork import QLocalSocket
+    sock = QLocalSocket()
+    sock.connectToServer(_instance_key())
+    if not sock.waitForConnected(300):
+        return False
+    sock.write(("\n".join(paths) + "\n").encode("utf-8"))
+    sock.flush()
+    sock.waitForBytesWritten(1000)
+    sock.disconnectFromServer()
+    return True
+
+
+def _instance_key() -> str:
+    import getpass
+    return f"PDFAnnotator-{getpass.getuser()}"
+
+
+def _listen_for_instances(win):
+    from PySide6.QtNetwork import QLocalServer
+    server = QLocalServer(win)
+    QLocalServer.removeServer(_instance_key())
+    if not server.listen(_instance_key()):
+        return None
+
+    def on_conn():
+        sock = server.nextPendingConnection()
+        if sock is None:
+            return
+        buf = bytearray()
+        done = [False]
+
+        def read():
+            buf.extend(bytes(sock.readAll()))
+
+        def finish():
+            read()
+            if done[0]:
+                return
+            done[0] = True
+            paths = [p for p in buf.decode("utf-8", "replace").splitlines()
+                     if p.strip() and os.path.isfile(p)]
+            if paths:
+                win.open_paths(paths)
+            if win.isMinimized():
+                win.showNormal()
+            win.raise_()
+            win.activateWindow()
+            sock.deleteLater()
+
+        sock.readyRead.connect(read)
+        sock.disconnected.connect(finish)
+        read()                               # bağlanmadan önce gelmiş veri
+        if sock.state() != sock.LocalSocketState.ConnectedState:
+            finish()
+
+    server.newConnection.connect(on_conn)
+    return server
+
+
 def main():
-    import sys
     app = QApplication(sys.argv)
+    files = [os.path.abspath(a) for a in sys.argv[1:] if os.path.isfile(a)]
+    if _send_to_running_instance(files):
+        return
     # Qt'nin kendi metinleri (Tamam/İptal, dosya penceresi vb.) Türkçe olsun
     from PySide6.QtCore import QLibraryInfo, QTranslator
     translator = QTranslator(app)
@@ -3063,7 +3399,10 @@ def main():
         app.installTranslator(translator)
     register_app_fonts()
     win = MainWindow()
+    win._instance_server = _listen_for_instances(win)
     win.show()
+    if files:
+        QTimer.singleShot(0, lambda: win.open_paths(files))
     sys.exit(app.exec())
 
 
