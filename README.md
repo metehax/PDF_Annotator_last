@@ -38,6 +38,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/welcome.py`  | Açılış ekranı: sürükle-bırak alanı, son açılan dosyalar |
 | `ui/toast.py`    | Köşede beliren ve kendiliğinden kaybolan bildirimler |
 | `ui/palette.py`  | Ctrl+K komut paleti (Türkçe karakterlere duyarsız arama) |
+| `docsec.py`      | Parola/izinler, sıkıştırma seviyeleri, güvenlik taraması ve temizliği, belge bilgileri |
+| `ui/docdialogs.py` | Parola, sıkıştırma, belge bilgileri ve güvenlik denetimi pencereleri |
 | `pii.py`         | Kişisel veri bulucu (TC, IBAN, telefon, e-posta, plaka, kart); kontrol haneli doğrulama |
 | `ui/kvkk.py`     | "Kişisel verileri bul ve karart" penceresi |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
@@ -189,3 +191,16 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   damgalarınız. İsteğe bağlı ad + tarih satırı ve eğik görünüm. Basılan damga
   taşınabilir/boyutlandırılabilir. **Belge → Damga kütüphanesi** ya da özellik
   çubuğundaki "Kütüphane…" ile logolu özel damgalar oluşturulur.
+
+## Yeni: Belge güvenliği ve bilgileri
+
+* **Parolalı PDF açma:** Parola sorulur; kaydederken aynı açma parolası korunur.
+* **Belge → Parola koruması:** Açma parolası ve izinler (yazdırma, kopyalama,
+  düzenleme, yorum, form doldurma, sayfa düzenleme, ekran okuyucu). 256-bit AES.
+* **Dosya → Sıkıştırarak kaydet:** Hafif / Dengeli / Güçlü; sonuçta kaç MB'tan
+  kaça indiği gösterilir.
+* **Belge → Belge bilgileri (Ctrl+D):** Başlık, yazar, konu, anahtar kelimeler;
+  dosya bilgileri; gömülü dosyaları ekleme, dışarı kaydetme, silme.
+* **Belge → Güvenlik denetimi:** JavaScript, otomatik eylemler, program çalıştırma,
+  veri gönderme, gömülü dosyalar, çoklu ortam, dış bağlantılar, gizli katmanlar ve
+  metadata listelenir; seçilenler tek tıkla temizlenir.

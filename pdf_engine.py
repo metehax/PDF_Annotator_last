@@ -280,6 +280,14 @@ def image_to_pdf_document(path: str) -> Tuple["fitz.Document", float]:
     return doc, native_zoom
 
 
+class PasswordRequired(Exception):
+    """Belge parolalı ve parola verilmedi / yanlış."""
+
+    def __init__(self, wrong: bool = False):
+        super().__init__("Parola gerekli" if not wrong else "Parola yanlış")
+        self.wrong = wrong
+
+
 # ---------------------------------------------------------------------------
 # PDF belgesi sarmalayıcı
 # ---------------------------------------------------------------------------
@@ -287,7 +295,7 @@ class PDFDocument:
     """PyMuPDF belgesini sarar: render (LRU önbellekli + asenkron), metin
     çıkarımı / arama / içindekiler, dışa aktarım ve sayfa yönetimi."""
 
-    def __init__(self, path: str):
+    def __init__(self, path: str, password: Optional[str] = None):
         self.path = path
         self.is_image = is_image_path(path)
         # Resim kaynaklı belgelerde orijinal piksel boyutuna dönüş çarpanı
@@ -296,6 +304,12 @@ class PDFDocument:
             self.doc, self.native_zoom = image_to_pdf_document(path)
         else:
             self.doc = fitz.open(path)
+        # Parolalı belge: doğru parolayla açılır; bellekteki kopya şifresiz yazılır
+        self.was_encrypted = bool(getattr(self.doc, "is_encrypted", False) or self.doc.needs_pass)
+        if self.doc.needs_pass:
+            if not password or not self.doc.authenticate(password):
+                self.doc.close()
+                raise PasswordRequired(wrong=bool(password))
         self.lock = threading.RLock()          # MuPDF thread-safety koruması
         self._pix_cache = LRUCache(LRU_CACHE_SIZE)
         self._thumb_cache = LRUCache(64)
@@ -521,14 +535,19 @@ class PDFDocument:
         return tmp
 
     def export_pdf(self, out_path: str, annotations_by_page, font_ctx,
-                    watermark: Optional[WatermarkConfig] = None) -> None:
+                    watermark: Optional[WatermarkConfig] = None, security=None,
+                    compress: Optional[str] = None) -> None:
+        """security: docsec.SecurityOptions (parola/izinler), compress: docsec seviye anahtarı."""
         tmp = self._annotated_copy(annotations_by_page, font_ctx)
         if watermark is not None:
             current_index = 0
             pages = (list(range(tmp.page_count)) if watermark.scope != "current"
                      else [current_index])
             apply_watermark_to_pages(tmp, watermark, font_ctx, pages)
-        tmp.save(out_path, garbage=3, deflate=True)
+        from docsec import apply_compression, save_kwargs
+        kwargs = apply_compression(tmp, compress)
+        kwargs.update(save_kwargs(security))
+        tmp.save(out_path, **kwargs)
         tmp.close()
 
     def export_image(self, index: int, page_annotations, font_ctx, out_path: str,

@@ -46,7 +46,7 @@ from models import (
     WatermarkConfig, ZOrderCommand, number_to_color,
 )
 from pdf_engine import (
-    IMAGE_EXTS, PDFDocument, image_to_pdf_document, is_image_path,
+    IMAGE_EXTS, PasswordRequired, PDFDocument, image_to_pdf_document, is_image_path,
     load_image_bytes_from_path, qimage_to_png_bytes,
     resolve_font_ctx, save_project_json, load_project_json,
 )
@@ -56,6 +56,8 @@ from fonts import FONT_FAMILIES, register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon, pixmap as icon_pixmap
 from ui.overlays import FloatingBar
+import docsec
+from ui.docdialogs import CompressDialog, DocInfoDialog, PasswordDialog, SecurityCheckDialog
 from ui.kvkk import KvkkDialog
 from ui.palette import Command, CommandPalette
 from ui.stamps import SCALE as STAMP_SCALE, StampLibrary, StampLibraryDialog, image_png_bytes, \
@@ -96,6 +98,10 @@ TOOL_NAMES = {t[0]: t[1] for t in TOOLS if t}
 TOOL_KEYS = {"select": "V", "text": "T", "edit": "E", "ink": "P", "highlight": "H", "line": "L",
              "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "stamp": "S", "crop": "C"}
 APP_ID = "PDFAnnotator.Belge"
+
+
+class _OpenCancelled(Exception):
+    """Kullanıcı parola sorusunu iptal etti."""
 
 
 # ---------------------------------------------------------------------------
@@ -819,6 +825,7 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         A(m_file, "save", "Kaydet", self.save_document, "Ctrl+S")
         A(m_file, "file", "PDF olarak kaydet…", self.save_pdf, "Ctrl+Shift+S")
+        A(m_file, "compress", "Sıkıştırarak kaydet…", self.save_compressed)
         A(m_file, "image", "Resim olarak kaydet…", self.save_as_image)
         A(m_file, "watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark)
         m_exp = m_file.addMenu(icon("download"), "Dışa aktar")
@@ -881,6 +888,9 @@ class MainWindow(QMainWindow):
         A(m_doc, "ocr", "OCR (metin tanıma)…", self.open_ocr_dialog)
         A(m_doc, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
         m_doc.addSeparator()
+        A(m_doc, "info", "Belge bilgileri…", self.open_doc_info, "Ctrl+D")
+        A(m_doc, "lock", "Parola koruması…", self.open_password)
+        A(m_doc, "shield", "Güvenlik denetimi…", self.open_security_check)
         A(m_doc, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
         A(m_doc, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
 
@@ -898,6 +908,7 @@ class MainWindow(QMainWindow):
         self.export_menu = QMenu(self)
         for entry in (
             ("file", "PDF olarak kaydet", self.save_pdf),
+            ("compress", "Sıkıştırarak kaydet…", self.save_compressed),
             ("image", "Resim olarak kaydet (orijinal çözünürlük)", self.save_as_image),
             ("watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark),
             None,
@@ -1862,6 +1873,8 @@ class MainWindow(QMainWindow):
             try:
                 self._open_path_as_session(p)
                 last_idx = len(self.sessions) - 1
+            except _OpenCancelled:
+                continue
             except Exception as ex:
                 QMessageBox.critical(self, "Hata", f"'{p}' açılamadı:\n{ex}")
         if last_idx is None:
@@ -1997,8 +2010,26 @@ class MainWindow(QMainWindow):
     # Belge oturumları (QTabBar tabanlı çoklu PDF)
     # =====================================================================
     def _open_path_as_session(self, path):
-        pdf = PDFDocument(path)
+        password = None
+        while True:
+            try:
+                pdf = PDFDocument(path, password)
+                break
+            except PasswordRequired as ex:
+                msg = ("Parola yanlış, tekrar deneyin.\n\n" if ex.wrong else "") + \
+                    f"'{os.path.basename(path)}' parolayla korunuyor. Parolayı girin:"
+                pw, ok = QInputDialog.getText(self, "Parolalı belge", msg, QLineEdit.EchoMode.Password)
+                if not ok:
+                    raise _OpenCancelled()
+                password = pw
         session = DocumentSession(pdf, path)
+        session.security = None
+        if password:
+            # koruma kaydederken kendiliğinden kalkmasın: aynı açma parolası varsayılan
+            session.security = docsec.SecurityOptions(user_password=password)
+            QTimer.singleShot(300, lambda: self.toasts.show(
+                "Belge parolalı. Kaydederken aynı parola korunur; değiştirmek için "
+                "Belge → Parola koruması.", "info", timeout_ms=6000))
         session.undo_stack.cleanChanged.connect(lambda _c: self.refresh_doc_tabs())
         self._add_recent(path)
         self.undo_group.addStack(session.undo_stack)
@@ -2017,7 +2048,10 @@ class MainWindow(QMainWindow):
             self.doc_tabbar.removeTab(0)
         for s in self.sessions:
             i = self.doc_tabbar.addTab(("● " if self._is_dirty(s) else "") + s.title)
-            self.doc_tabbar.setTabToolTip(i, s.path + ("\nKaydedilmemiş değişiklikler var" if self._is_dirty(s) else ""))
+            sec = getattr(s, "security", None)
+            self.doc_tabbar.setTabToolTip(
+                i, s.path + ("\nKaydedilmemiş değişiklikler var" if self._is_dirty(s) else "")
+                + (f"\nParola koruması: {sec.describe()}" if sec is not None and sec.active else ""))
         if self.active_session is not None:
             mark = "● " if self._is_dirty(self.active_session) else ""
             self.setWindowTitle(f"{mark}{self.active_session.title} — PDF İşaretleme Aracı")
@@ -2198,7 +2232,7 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
         try:
-            s.pdf.export_pdf(path, s.annotations, self.font_ctx)
+            s.pdf.export_pdf(path, s.annotations, self.font_ctx, security=getattr(s, "security", None))
             self.status.setText(f"Kaydedildi: {path}")
             self._mark_saved(s)
             self._toast_saved("PDF kaydedildi", path)
@@ -2228,7 +2262,8 @@ class MainWindow(QMainWindow):
         if not path.lower().endswith(".pdf"):
             path += ".pdf"
         try:
-            s.pdf.export_pdf(path, s.annotations, self.font_ctx, watermark=cfg)
+            s.pdf.export_pdf(path, s.annotations, self.font_ctx, watermark=cfg,
+                             security=getattr(s, "security", None))
             self.status.setText(f"Filigranlı PDF kaydedildi: {path}")
             self._toast_saved("Filigranlı PDF kaydedildi", path)
         except Exception as ex:
@@ -3023,6 +3058,78 @@ class MainWindow(QMainWindow):
         s.undo_stack.push(AddAnnotationCommand(s, s.current_page, ann, on_change=self._on_session_change,
                                                label="Damga"))
         self.status.setText(f"'{st.text}' damgası basıldı. Taşımak için Seç aracını (V) kullanın.")
+
+    # -- belge güvenliği ve bilgileri ------------------------------------------
+    def save_compressed(self):
+        s = self.active_session
+        if not s:
+            return
+        size = os.path.getsize(s.path) if os.path.exists(s.path) else 0
+        dlg = CompressDialog(self, size)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return
+        default = os.path.splitext(s.path)[0] + "_kucuk.pdf"
+        path, _ = QFileDialog.getSaveFileName(self, "Sıkıştırılmış PDF'i Kaydet", default, "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        QApplication.setOverrideCursor(Qt.CursorShape.WaitCursor)
+        try:
+            s.pdf.export_pdf(path, s.annotations, self.font_ctx, security=getattr(s, "security", None),
+                             compress=dlg.level())
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
+            return
+        finally:
+            QApplication.restoreOverrideCursor()
+        new = os.path.getsize(path)
+        self._mark_saved(s)
+        if size:
+            pct = round(100 * (1 - new / size))
+            change = f"%{pct} küçüldü" if pct > 0 else "zaten sıkıştırılmıştı"
+            text = f"Sıkıştırıldı: {docsec.human_size(size)} → {docsec.human_size(new)} ({change})"
+        else:
+            text = f"Kaydedildi: {docsec.human_size(new)}"
+        self.status.setText(text)
+        self._toast_saved(text, path)
+
+    def open_password(self):
+        s = self.active_session
+        if not s:
+            return
+        dlg = PasswordDialog(self, getattr(s, "security", None))
+        code = dlg.exec()
+        if code == QDialog.DialogCode.Rejected:
+            return
+        s.security = dlg.result_options if code != 2 else None
+        self._mark_dirty(s)
+        if s.security is not None and s.security.active:
+            self.toasts.show(f"Parola koruması ayarlandı ({s.security.describe()}). "
+                             "Belgeyi kaydettiğinizde uygulanır.", "success", timeout_ms=5000)
+        else:
+            s.security = None
+            self.toasts.show("Parola koruması kaldırıldı. Kaydettiğinizde belge parolasız olur.", "info")
+
+    def open_doc_info(self):
+        s = self.active_session
+        if not s:
+            return
+        DocInfoDialog(self, s, lambda: self._mark_dirty(s)).exec()
+
+    def open_security_check(self):
+        s = self.active_session
+        if not s:
+            return
+
+        def cleaned():
+            s.pdf._invalidate()                  # sayfa içeriği değişmiş olabilir
+            self._mark_dirty(s)
+            self._build_thumbnails()
+            self.goto_page(s.current_page)
+            self.toasts.show("Seçilen içerik temizlendi. Kaydettiğinizde PDF'e yansır.", "success")
+
+        SecurityCheckDialog(self, s, cleaned).exec()
 
     # -- KVKK ----------------------------------------------------------------
     def open_kvkk(self):
