@@ -56,7 +56,10 @@ from fonts import FONT_FAMILIES, register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon, pixmap as icon_pixmap
 from ui.overlays import FloatingBar
+from ui.kvkk import KvkkDialog
 from ui.palette import Command, CommandPalette
+from ui.stamps import SCALE as STAMP_SCALE, StampLibrary, StampLibraryDialog, image_png_bytes, \
+    preview_icon, render_stamp, today
 from ui.toast import ToastManager
 from ui.sidepanel import SidePanel
 from ui.welcome import WelcomeScreen
@@ -85,12 +88,13 @@ TOOLS = [
     ("redact", "Gizle (Sansür)", "redact", "Altındaki içeriği kalıcı olarak sil"),
     ("image", "Resim", "image", "Sayfaya resim yerleştir"),
     ("number", "Numarala", "number", "Sıra numarası koy"),
+    ("stamp", "Damga", "stamp", "Hazır ya da kendi damganızı basın"),
     ("crop", "Kırp / Yakala", "crop", "Bir alanı görsel olarak yakala"),
 ]
 TOOL_NAMES = {t[0]: t[1] for t in TOOLS if t}
 # Tek harfli araç kısayolları (yazı yazılan alanlarda devreye girmez)
 TOOL_KEYS = {"select": "V", "text": "T", "edit": "E", "ink": "P", "highlight": "H", "line": "L",
-             "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "crop": "C"}
+             "rect": "R", "oval": "O", "redact": "X", "image": "I", "number": "N", "stamp": "S", "crop": "C"}
 APP_ID = "PDFAnnotator.Belge"
 
 
@@ -578,6 +582,7 @@ class MainWindow(QMainWindow):
         self._last_shape = "rect"
         self._last_side_page = "pages"
         self._side_was_open = True
+        self._kvkk_dialog = None
         self._zoom = 1.0
 
         # Karşılaştırma "Eşleştir modu" durumu
@@ -590,6 +595,7 @@ class MainWindow(QMainWindow):
         self._search_pos = -1
         self._pending_search_tasks = []
 
+        self.stamp_lib = StampLibrary(self.settings)
         self._build_ui()
         self._apply_style()
         geo = self.settings.value("geometry")
@@ -874,6 +880,9 @@ class MainWindow(QMainWindow):
         m_doc.addSeparator()
         A(m_doc, "ocr", "OCR (metin tanıma)…", self.open_ocr_dialog)
         A(m_doc, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
+        m_doc.addSeparator()
+        A(m_doc, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
+        A(m_doc, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
 
         m_help = QMenu("Yardım", self)
         A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
@@ -997,6 +1006,8 @@ class MainWindow(QMainWindow):
         self.thumb_list.verticalScrollBar().valueChanged.connect(lambda _v: self._thumb_timer.start(60))
         self.thumb_list.setContextMenuPolicy(Qt.ContextMenuPolicy.CustomContextMenu)
         self.thumb_list.customContextMenuRequested.connect(self._on_thumb_context_menu)
+        # genişlik değişince (panel açılıp kapanınca) satır yükseklikleri yeniden hesaplansın
+        self.thumb_list.viewport().installEventFilter(self)
         side.add_page("pages", "grid", "Sayfalar", self.thumb_list)
 
         self.toc_tree = QTreeWidget()
@@ -1057,6 +1068,7 @@ class MainWindow(QMainWindow):
         self.view.annotationCreated.connect(self.add_annotation)
         self.view.textRequested.connect(self.on_text_requested)
         self.view.numberRequested.connect(self.on_number_requested)
+        self.view.stampRequested.connect(self.on_stamp_requested)
         self.view.editTextRequested.connect(self.on_edit_text_requested)
         self.view.cropRequested.connect(self.on_crop_requested)
         self.view.imagePlaceRequested.connect(self.on_image_place_requested)
@@ -1423,6 +1435,36 @@ class MainWindow(QMainWindow):
         ))
         self._tool_pages["number"] = idx; idx += 1
 
+        self.stamp_combo = QComboBox()
+        self.stamp_combo.setIconSize(QSize(104, 26))
+        self.stamp_combo.setMinimumWidth(150)
+        self.stamp_combo.setToolTip("Basılacak damga")
+        self._fill_stamp_combo()
+        self.chk_stamp_sub = QCheckBox("Ad ve tarih")
+        self.chk_stamp_sub.setChecked(str(self.settings.value("stampSub", "true")).lower() != "false")
+        self.chk_stamp_sub.toggled.connect(lambda v: (self.settings.setValue("stampSub", bool(v)),
+                                                      self.stamp_name.setEnabled(v)))
+        import getpass
+        self.stamp_name = QLineEdit(str(self.settings.value("author", "") or getpass.getuser()))
+        self.stamp_name.setPlaceholderText("Ad Soyad")
+        self.stamp_name.setFixedWidth(130)
+        self.stamp_name.setEnabled(self.chk_stamp_sub.isChecked())
+        self.stamp_name.editingFinished.connect(
+            lambda: self.settings.setValue("author", self.stamp_name.text().strip()))
+        self.chk_stamp_slant = QCheckBox("Eğik")
+        self.chk_stamp_slant.setChecked(str(self.settings.value("stampSlant", "false")).lower() == "true")
+        self.chk_stamp_slant.toggled.connect(lambda v: self.settings.setValue("stampSlant", bool(v)))
+        btn_lib = QPushButton(icon("stamp"), "Kütüphane…")
+        btn_lib.setObjectName("secondary")
+        btn_lib.clicked.connect(self.open_stamp_library)
+        self.prop_stack.addWidget(page(
+            self.stamp_combo, self.chk_stamp_sub, self.stamp_name, self.chk_stamp_slant, btn_lib,
+            self._hint("Sayfada damganın ortalanacağı yere tıklayın. Bastıktan sonra Seç aracıyla "
+                      "taşıyıp köşelerinden boyutlandırabilirsiniz. 'Kütüphane…' ile logolu "
+                      "kendi damgalarınızı oluşturabilirsiniz."),
+        ))
+        self._tool_pages["stamp"] = idx; idx += 1
+
         self.prop_stack.addWidget(page(
             self._hint("Bir alan sürükleyip bırakın; açılan pencereden PNG "
                       "olarak kaydedebilir ya da panoya kopyalayabilirsiniz.\n\n"
@@ -1512,12 +1554,16 @@ class MainWindow(QMainWindow):
     # =====================================================================
     def eventFilter(self, obj, ev):
         et = ev.type()
-        if obj is self.workspace and et == QEvent.Type.Resize:
+        if obj is getattr(self, "workspace", None) and et == QEvent.Type.Resize:
             self._layout_overlays()
             if hasattr(self, "toasts"):
                 self.toasts.relayout()
-        elif obj is self.page_bar and et == QEvent.Type.Leave:
+        elif obj is getattr(self, "page_bar", None) and et == QEvent.Type.Leave:
             self._page_bar_timer.start()
+        elif et == QEvent.Type.Resize and hasattr(self, "thumb_list") and obj is self.thumb_list.viewport():
+            if ev.oldSize().width() != ev.size().width():
+                QTimer.singleShot(0, self.thumb_list.doItemsLayout)
+                self._thumb_timer.start(80)
         return super().eventFilter(obj, ev)
 
     def resizeEvent(self, e):
@@ -1893,8 +1939,9 @@ class MainWindow(QMainWindow):
             ("Ctrl+0 / Ctrl+1 / Ctrl+2", "Tam sayfa / %100 / Genişliğe sığdır"),
             ("Boşluk + sürükle", "Sayfayı kaydır"), ("Orta tuş + sürükle", "Sayfayı kaydır"),
             ("Ctrl+K", "Komut paleti"), ("Esc", "Seç aracına dön / seçimi kaldır"),
-            ("V T E P H L R O X I N C", "Araçlar: Seç, Metin, Metin Düzenle, Kalem, Fosforlu, Çizgi, "
-                                        "Dörtgen, Oval, Gizle, Resim, Numarala, Kırp"),
+            ("Ctrl+Shift+K", "Kişisel verileri bul ve karart"), ("S", "Damga aracı"),
+            ("V T E P H L R O X I N S C", "Araçlar: Seç, Metin, Metin Düzenle, Kalem, Fosforlu, Çizgi, "
+                                          "Dörtgen, Oval, Gizle, Resim, Numarala, Damga, Kırp"),
             ("Home / End", "İlk / son sayfa"), ("PgUp / PgDn", "Ekran ekran kaydır"),
             ("← / →", "Önceki / sonraki sayfa"), ("Ctrl+R / Ctrl+Shift+R", "Sayfayı döndür"),
         ]
@@ -2930,6 +2977,67 @@ class MainWindow(QMainWindow):
             stack.endMacro()
         self.status.setText("Metin güncellendi. Geri almak için Ctrl+Z.")
 
+    # -- damga ---------------------------------------------------------------
+    def _fill_stamp_combo(self, select_key=None):
+        if select_key is None and self.stamp_combo.count():
+            cur = self.stamp_combo.currentData()
+            select_key = cur.key() if cur else None
+        if select_key is None:
+            select_key = self.settings.value("stampKey", "")
+        self.stamp_combo.blockSignals(True)
+        self.stamp_combo.clear()
+        for st in self.stamp_lib.all():
+            self.stamp_combo.addItem(preview_icon(st, 22), "", st)
+            self.stamp_combo.setItemData(self.stamp_combo.count() - 1, st.text, Qt.ItemDataRole.ToolTipRole)
+            if st.key() == select_key:
+                self.stamp_combo.setCurrentIndex(self.stamp_combo.count() - 1)
+        self.stamp_combo.blockSignals(False)
+        self.stamp_combo.currentIndexChanged.connect(
+            lambda _i: self.settings.setValue("stampKey", self.stamp_combo.currentData().key())
+            if self.stamp_combo.currentData() else None)
+
+    def open_stamp_library(self):
+        StampLibraryDialog(self.stamp_lib, self).exec()
+        self._fill_stamp_combo()
+        self._update_prop_bar()
+
+    def on_stamp_requested(self, pt: QPointF):
+        s = self.active_session
+        st = self.stamp_combo.currentData()
+        if not s or st is None:
+            return
+        sub = ""
+        if self.chk_stamp_sub.isChecked():
+            name = self.stamp_name.text().strip()
+            sub = f"{name} · {today()}" if name else today()
+        img = render_stamp(st, sub, self.chk_stamp_slant.isChecked())
+        w, h = img.width() / STAMP_SCALE, img.height() / STAMP_SCALE
+        pw, ph = s.pdf.page_size(s.current_page)
+        if w > pw * 0.9:                       # çok dar sayfada sığdır
+            k = pw * 0.9 / w
+            w, h = w * k, h * k
+        x = min(max(0.0, pt.x() - w / 2), max(0.0, pw - w))
+        y = min(max(0.0, pt.y() - h / 2), max(0.0, ph - h))
+        ann = ImageAnnotation(QRectF(x, y, w, h), image_png_bytes(img), 1.0, True,
+                              source_path=f"stamp:{st.text}")
+        s.undo_stack.push(AddAnnotationCommand(s, s.current_page, ann, on_change=self._on_session_change,
+                                               label="Damga"))
+        self.status.setText(f"'{st.text}' damgası basıldı. Taşımak için Seç aracını (V) kullanın.")
+
+    # -- KVKK ----------------------------------------------------------------
+    def open_kvkk(self):
+        s = self.active_session
+        if not s:
+            self.toasts.show("Önce bir belge açın.", "info")
+            return
+        if self._kvkk_dialog is not None and self._kvkk_dialog.isVisible() \
+                and self._kvkk_dialog._session is s:
+            self._kvkk_dialog.raise_()
+            self._kvkk_dialog.activateWindow()
+            return
+        self._kvkk_dialog = KvkkDialog(self, s)
+        self._kvkk_dialog.show()
+
     def on_number_requested(self, scene_pt: QPointF):
         s = self.active_session
         if not s:
@@ -3234,6 +3342,9 @@ class MainWindow(QMainWindow):
         if isinstance(ann, NumberAnnotation):
             return "number", f"Numara {ann.number}"
         if isinstance(ann, ImageAnnotation):
+            src = ann.source_path or ""
+            if src.startswith("stamp:"):
+                return "stamp", f"Damga: {src[6:]}"
             return "image", "Resim"
         return "layers", "Öge"
 

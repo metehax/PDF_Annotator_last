@@ -38,6 +38,9 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/welcome.py`  | Açılış ekranı: sürükle-bırak alanı, son açılan dosyalar |
 | `ui/toast.py`    | Köşede beliren ve kendiliğinden kaybolan bildirimler |
 | `ui/palette.py`  | Ctrl+K komut paleti (Türkçe karakterlere duyarsız arama) |
+| `pii.py`         | Kişisel veri bulucu (TC, IBAN, telefon, e-posta, plaka, kart); kontrol haneli doğrulama |
+| `ui/kvkk.py`     | "Kişisel verileri bul ve karart" penceresi |
+| `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
 
@@ -173,3 +176,16 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   "Windows'ta 'Birlikte aç' listesine ekle" yalnızca kullanıcı hesabınız için
   kayıt yapar (HKCU), varsayılan uygulamanızı değiştirmez; aynı menüden kaldırılabilir.
 * Pencere boyutu/konumu ve kenar paneli durumu bir sonraki açılışta hatırlanır.
+
+## Yeni: Kişisel veri karartma (KVKK) ve damgalar
+
+* **Belge → Kişisel verileri bul ve karart (Ctrl+Shift+K):** TC kimlik no, IBAN,
+  telefon, e-posta, araç plakası ve kart numaralarını bulur. TC/IBAN/kart
+  numaraları kontrol haneleriyle doğrulanır, böylece fatura no, tutar gibi
+  sayılar yanlışlıkla seçilmez. Taranmış sayfalar OCR ile okunur. Bulunanlar
+  sayfada vurgulanır; istediklerinizi seçip tek tıkla karartırsınız (tek Ctrl+Z
+  ile geri alınır). Dışa aktarırken altındaki metin PDF'ten kalıcı silinir.
+* **Damga aracı (S):** ONAYLANDI, REDDEDİLDİ, GÖRÜLDÜ, ASLI GİBİDİR … ve kendi
+  damgalarınız. İsteğe bağlı ad + tarih satırı ve eğik görünüm. Basılan damga
+  taşınabilir/boyutlandırılabilir. **Belge → Damga kütüphanesi** ya da özellik
+  çubuğundaki "Kütüphane…" ile logolu özel damgalar oluşturulur.

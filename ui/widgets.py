@@ -49,6 +49,10 @@ class ThumbnailDelegate(QStyledItemDelegate):
 
         aspect = index.data(THUMB_ASPECT_ROLE) or 1.414
         tw = self._thumb_width(option)
+        # satır yüksekliği eski bir genişliğe göre hesaplanmış olabilir: taşmasın
+        avail_h = r.height() - self.LABEL_H - 2 * self.PAD
+        if avail_h > 0:
+            tw = min(tw, avail_h / aspect)
         th = tw * aspect
         page = QRectF(r.center().x() - tw / 2, r.top() + self.PAD, tw, th)
 

@@ -129,7 +129,10 @@ class ToastManager:
         self.relayout()
 
     def relayout(self) -> None:
-        y = self.host.height() - self.MARGIN
+        try:
+            y = self.host.height() - self.MARGIN
+        except RuntimeError:            # pencere kapanırken ana bölge silinmiş olabilir
+            return
         for t in reversed(self._toasts):
             try:
                 t.adjustSize()

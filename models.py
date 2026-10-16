@@ -625,6 +625,7 @@ class ImageAnnotation(Annotation):
     def create_item(self) -> QGraphicsItem:
         pm = QPixmap.fromImage(self._qimage())
         item = QGraphicsPixmapItem(pm)
+        item.setTransformationMode(Qt.TransformationMode.SmoothTransformation)
         if pm.width() and pm.height():
             sx = self.rect.width() / pm.width()
             sy = self.rect.height() / pm.height()

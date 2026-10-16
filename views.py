@@ -125,6 +125,7 @@ class PDFView(QGraphicsView):
     selectionAnnotationChanged = Signal(object)      # seçili Annotation | None
     currentPageChanged = Signal(int)                 # kaydırma / tıklama ile
     hoveredPageChanged = Signal(int)                 # imlecin üstünde olduğu sayfa (-1: yok)
+    stampRequested = Signal(QPointF)                 # damga aracıyla tıklandı
     zoomChanged = Signal(float)
 
     # Tüm konum sinyalleri (textRequested, numberRequested, …) SAYFA
@@ -715,6 +716,11 @@ class PDFView(QGraphicsView):
         if tool == "number":
             if e.button() == Qt.MouseButton.LeftButton:
                 self.numberRequested.emit(pt)
+            return
+
+        if tool == "stamp":
+            if e.button() == Qt.MouseButton.LeftButton:
+                self.stampRequested.emit(pt)
             return
 
         if tool == "edit":
