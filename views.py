@@ -39,6 +39,8 @@ from PySide6.QtWidgets import (
 )
 
 from gizmo import SelectionGizmo
+from ui import theme as ui_theme
+from ui.icons import icon
 from models import (
     Annotation, HighlightAnnotation, ImageAnnotation, InkAnnotation,
     LineAnnotation, RedactionAnnotation, ShapeAnnotation,
@@ -321,6 +323,9 @@ class PDFView(QGraphicsView):
     def set_invert(self, invert: bool) -> None:
         self._ensure_document(self._session, invert)
 
+    def set_canvas_color(self, color: QColor) -> None:
+        self.setBackgroundBrush(color)
+
     def page_rect_in_scene(self, index: int) -> QRectF:
         p = self._pages[index]
         return QRectF(p.pos(), QSizeF(p.w, p.h))
@@ -487,9 +492,11 @@ class PDFView(QGraphicsView):
         if not self._pages:
             return
         p = self._pages[self._current if index is None else index]
-        avail = self.viewport().width() - 32
+        widest = max(pg.w for pg in self._pages)
         if p.w > 0:
-            self.set_zoom(avail / p.w)
+            # kenar boşlukları dahil sahne genişliği görünüme sığsın (yatay çubuk çıkmasın)
+            z = (self.viewport().width() - 24) / (max(p.w, widest) + 2 * DOC_MARGIN)
+            self.set_zoom(z)
             self.scroll_to_page(p.index)
 
     def fit_page(self, index: Optional[int] = None) -> None:
@@ -1091,13 +1098,19 @@ class ComparePane(QWidget):
         nav = QWidget()
         h = QHBoxLayout(nav)
         h.setContentsMargins(0, 0, 0, 0)
-        self.btn_prev = QPushButton("◀")
+        self.btn_prev = QPushButton(icon("chevron_left"), "")
+        self.btn_prev.setObjectName("iconbtn")
+        self.btn_prev.setToolTip("Önceki sayfa")
         self.btn_prev.clicked.connect(lambda: self._change_page(-1))
         self.lbl = QLabel("0 / 0")
+        self.lbl.setObjectName("pagelbl")
         self.lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
-        self.btn_next = QPushButton("▶")
+        self.btn_next = QPushButton(icon("chevron_right"), "")
+        self.btn_next.setObjectName("iconbtn")
+        self.btn_next.setToolTip("Sonraki sayfa")
         self.btn_next.clicked.connect(lambda: self._change_page(1))
-        self.btn_fit = QPushButton("⤢")
+        self.btn_fit = QPushButton(icon("fit_page"), "")
+        self.btn_fit.setObjectName("iconbtn")
         self.btn_fit.setToolTip("Sayfaya sığdır (yakınlaştırmayı sıfırla)")
         self.btn_fit.clicked.connect(lambda: self._render(fit=True))
         h.addWidget(self.btn_prev)
@@ -1137,6 +1150,8 @@ class ComparePane(QWidget):
         self._render(fit=True)
 
     def _render(self, fit=False):
+        self.gview.setFrameShape(QFrame.Shape.NoFrame)
+        self.gview.setBackgroundBrush(QColor(ui_theme.current()["canvas"]))
         current_transform = self.gview.transform()
         self.scene.clear()
         if not self.session:

@@ -31,6 +31,9 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `pdf_engine.py`  | `PDFDocument` (PyMuPDF sarmalayıcı): **LRU önbellekli + asenkron (QThreadPool) render**, arama, İçindekiler, sayfa yönetimi/döndürme, PDF & görsel dışa aktarım, **filigran motoru**, JSON proje kaydı |
 | `gizmo.py`       | Seçili nesneler için **8 noktalı boyutlandırma kulpları** |
 | `views.py`       | `PDFView` (canvas etkileşimleri, **Bézier/Catmull-Rom ink yumuşatma**, arama vurguları), `ComparePane` (karşılaştırma modu) |
+| `ui/theme.py`    | Renk sistemi (açık/koyu tema belirteçleri), QPalette + stil dosyası, Windows temasını izleme |
+| `ui/icons.py`    | Uygulamanın kendi SVG ikon seti; renk temadan ve düğme durumundan çizim anında seçilir |
+| `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
 
 ## Öne çıkan mimari kararlar
