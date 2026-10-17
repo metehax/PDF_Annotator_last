@@ -8,6 +8,7 @@ son klasörü hatırlama. Değişiklikler anında ayara yazılır (Tamam/İptal 
 from __future__ import annotations
 
 import os
+import sys
 from typing import Dict
 
 from PySide6.QtCore import QUrl
@@ -33,7 +34,7 @@ class PreferencesDialog(QDialog):
     def __init__(self, main):
         super().__init__(main)
         self.setWindowTitle("Tercihler")
-        self.resize(560, 560)
+        self.resize(560, 660)
         self._main = main
         self._loading = True
         v = QVBoxLayout(self)
@@ -114,6 +115,24 @@ class PreferencesDialog(QDialog):
         self.chk_last = QCheckBox("Son kullanılan klasörü hatırla")
         self.chk_last.toggled.connect(self._last_changed)
         v.addWidget(self.chk_last)
+        v.addSpacing(6)
+        v.addWidget(_section("Windows"))
+        row = QHBoxLayout()
+        row.addWidget(QLabel("\"Birlikte aç\" listesi"))
+        row.addStretch(1)
+        self.btn_openwith_add = QPushButton("Ekle…")
+        self.btn_openwith_del = QPushButton("Kaldır")
+        for b in (self.btn_openwith_add, self.btn_openwith_del):
+            b.setObjectName("secondary")
+            b.setEnabled(sys.platform == "win32")
+            row.addWidget(b)
+        self.btn_openwith_add.clicked.connect(lambda: self._main._register_open_with())
+        self.btn_openwith_del.clicked.connect(lambda: self._main._unregister_open_with())
+        v.addLayout(row)
+        note = QLabel("PDF ve resimlere sağ tıklayıp Birlikte aç dediğinizde bu uygulamanın görünmesini sağlar (yalnız sizin hesabınız için).")
+        note.setObjectName("hint")
+        note.setWordWrap(True)
+        v.addWidget(note)
         v.addStretch(1)
 
         foot = QHBoxLayout()

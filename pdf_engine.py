@@ -471,6 +471,22 @@ class PDFDocument:
             self.doc.copy_page(index, to=index)
         self._invalidate()
 
+    def snapshot_bytes(self) -> bytes:
+        """Belgenin tamamının bellekteki hâli (düzeltmeler geri alınabilsin diye)."""
+        with self.lock:
+            return self.doc.write()
+
+    def replace_content(self, data: bytes):
+        """Belgenin içeriğini `data` (PDF baytları) ile değiştirir (sayfa sayısı değişmeyen toplu düzeltmelerin geri alınması)."""
+        with self.lock:
+            new, old = fitz.open("pdf", data), self.doc
+            self.doc = new
+            try:
+                old.close()
+            except Exception:
+                pass
+        self._invalidate()
+
     def page_bytes(self, index: int) -> bytes:
         """Tek sayfalık PDF baytları (sayfa silme geri alınabilsin diye)."""
         with self.lock:

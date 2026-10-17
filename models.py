@@ -1236,6 +1236,32 @@ class PageStructureCommand(QUndoCommand):
             self.on_change(self.session, self.target_before)
 
 
+class DocContentCommand(QUndoCommand):
+    """Belge içeriğini bütünüyle değiştiren (zaten uygulanmış) toplu düzeltmeyi geri alınabilir yapar:
+    önce/sonra belge baytları saklanır. İlk `redo()` (yığına itme anı) bir şey yapmaz; değişiklik o sırada uygulanmıştır."""
+
+    def __init__(self, session: "DocumentSession", label: str, before: bytes, after: bytes,
+                 on_change: Optional[Callable[[], None]] = None):
+        super().__init__(label)
+        self.session = session
+        self.before, self.after = before, after
+        self.on_change = on_change
+        self._first = True
+
+    def redo(self):
+        if self._first:
+            self._first = False
+            return
+        self.session.pdf.replace_content(self.after)
+        if self.on_change:
+            self.on_change()
+
+    def undo(self):
+        self.session.pdf.replace_content(self.before)
+        if self.on_change:
+            self.on_change()
+
+
 class FormValuesCommand(QUndoCommand):
     """Form alanlarının değerlerini yazar (ad -> değer; reset=True: tümünü boşalt).
     Hesaplanan alanlar her seferinde yeniden hesaplanır."""

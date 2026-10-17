@@ -119,12 +119,23 @@ check("a11y: dil önerisi", a.lang.currentData() == "tr-TR", a.lang.currentData(
 shot_path = os.path.join(SP, "d2_a11y.png")
 a.grab().save(shot_path)
 s_rep.dirty = False
+title0 = (s_rep.pdf.doc.metadata or {}).get("title", "")
+toc0 = s_rep.pdf.doc.get_toc()
+pages0 = s_rep.pdf.page_count
 a.fix_selected()
 check("a11y: düzeltince yeniden denetlendi", pump(until=lambda: a.report is not None and a.report.get("lang").status == "pass"), "")
 check("a11y: başlık/yer imi geçti", a.report.get("title").status == "pass" and a.report.get("headings").status == "pass",
       [(c.key, c.status) for c in a.report.checks])
 check("a11y: belge değişti işaretlendi", s_rep.dirty)
 check("a11y: pdf meta", (s_rep.pdf.doc.metadata or {}).get("title", "").startswith("Yillik"))
+check("a11y: düzeltme geri alınabilir (komut yığında, etiket)", s_rep.undo_stack.canUndo() and "Erişilebilirlik" in s_rep.undo_stack.undoText(), s_rep.undo_stack.undoText())
+s_rep.undo_stack.undo()
+check("a11y: geri al -> başlık, yer imi ve dil eski haline", (s_rep.pdf.doc.metadata or {}).get("title", "") == title0 and s_rep.pdf.doc.get_toc() == toc0
+      and "tr" not in s_rep.pdf.doc.xref_get_key(s_rep.pdf.doc.pdf_catalog(), "Lang")[1][:3] and s_rep.pdf.page_count == pages0)
+s_rep.undo_stack.redo()
+check("a11y: yinele -> düzeltmeler geri geldi", (s_rep.pdf.doc.metadata or {}).get("title", "").startswith("Yillik") and len(s_rep.pdf.doc.get_toc()) > 0
+      and "tr-TR" in s_rep.pdf.doc.xref_get_key(s_rep.pdf.doc.pdf_catalog(), "Lang")[1])
+check("a11y: not metni geri alınabileceğini söyler", "geri alınabilir" in a.note.text() and "alınamaz" not in a.note.text())
 check("a11y: toc panelde", s_rep.pdf.toc() != [] , s_rep.pdf.toc())
 check("a11y: düzeltilecek kalmadı (yalnız çözülemeyenler)", not a.report.fixable(), [c.key for c in a.report.fixable()])
 # rapor kaydet
@@ -158,6 +169,11 @@ check("ocr: metin çıkarılabiliyor", "rapor" in s_scan.pdf.doc[0].get_text().l
       s_scan.pdf.doc[0].get_text()[:50])
 check("ocr: sayfa sayısı aynı", s_scan.pdf.page_count == 2)
 check("ocr: dil de ayarlandı", b.report.get("lang").status == "pass")
+check("ocr: geri alınabilir (komut yığında)", s_scan.undo_stack.canUndo())
+s_scan.undo_stack.undo()
+check("ocr: geri al -> taranmış sayfalar eski (metin yok), sayfa sayısı aynı", s_scan.pdf.doc[0].get_text().strip() == "" and s_scan.pdf.page_count == 2)
+s_scan.undo_stack.redo()
+check("ocr: yinele -> metin geri geldi", "rapor" in s_scan.pdf.doc[0].get_text().lower() or "yillik" in s_scan.pdf.doc[0].get_text().lower())
 
 print(f"\nOZET: {sum(ok)}/{len(ok)} gecti")
 print("ekran:", shot_path)

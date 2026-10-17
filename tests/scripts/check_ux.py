@@ -195,14 +195,14 @@ check(f"Dosya menüsü doğrudan öğe ≤ 14 (önceden 20): {len(dosya)}", len(
 check("Belge alt menüleri: Sayfa / Numara,üstbilgi,filigran / Dönüştür ve düzleştir / Güvenlik ve gizlilik",
       [a.text() for a in belge if a.menu()] == ["Sayfa", "Numara, üstbilgi ve filigran", "Dönüştür ve düzleştir", "Güvenlik ve gizlilik"])
 sub = {a.text(): a.menu() for a in belge if a.menu()}
-check("Sayfa ▸ sil/ekle/kopyala/döndür/kırp", {"Sayfayı sil", "Sayfayı kopyala", "Sonrasına boş sayfa ekle", "Saat yönünde döndür", "Saatin tersine döndür", "Sayfaları kırp…"}
+check("Sayfa ▸ sil/ekle/kopyala/döndür/kırp", {"Sayfayı sil", "Sayfayı kopyala", "Sonrasına boş sayfa ekle", "Saat yönünde döndür", "Saatin tersine döndür", "Sayfa kenarlarını kırp…"}
       <= {a.text() for a in sub["Sayfa"].actions()})
 check("Dönüştür ▸ Word/Excel/Düzleştir; Güvenlik ▸ parola/denetim/KVKK", {"Düzleştir ve kaydet…", "Word'e dönüştür (.docx)…", "Excel'e dönüştür (tablolar, .xlsx)…"}
       <= {a.text() for a in sub["Dönüştür ve düzleştir"].actions()} and {"Parola koruması…", "Güvenlik denetimi…", "Kişisel verileri bul ve karart (KVKK)…"}
       <= {a.text() for a in sub["Güvenlik ve gizlilik"].actions()})
 check("Damga kütüphanesi İmza menüsünde", acts["Damga kütüphanesi…"] in menus["İmza"].actions())
 check("Dosya alt menüleri: Dışa aktar / Paylaş / Tara ve içe aktar / Birleştir ve böl", {"Dışa aktar", "Paylaş", "Tara ve içe aktar", "Birleştir ve böl"} <= {a.text() for a in dosya if a.menu()})
-expected = ["Sayfayı sil", "Belge tara (görsellerden)…", "Telefonla aktar (QR)…", "Birleştir…", "Düzleştir ve kaydet…", "Erişilebilirlik denetimi…", "KVKK"]
+expected = ["Sayfayı sil", "Fotoğraftan belge tara…", "Telefonla aktar (QR)…", "Birleştir…", "Düzleştir ve kaydet…", "Erişilebilirlik denetimi…", "KVKK"]
 allacts = {a.text() for a in w.findChildren(QAction)}
 check("eski eylemlerin hepsi hâlâ var", all(any(e in t for t in allacts) for e in expected) and "Her sayfayı ayrı PDF yap…" in allacts and "Sayfa aralığını çıkar…" in allacts)
 cmds = w._palette_commands("")
@@ -412,6 +412,95 @@ sd.reset_page()
 pump(200)
 check("sıfırla düğmesi işlevi korunmuş", sd.cur is not None and sd.cur.skew == 0.0 and sd.cur.filt == "otomatik")
 sd.close()
+
+# ====================== O5: karşılaştırma modu ======================
+import re
+from textdiff import Change, DiffResult
+
+DOC2 = os.path.join(tmp, "dort_v2.pdf")
+d2 = fitz.open(DOC)
+d2[0].insert_text((72, 200), "Eklenen yeni cumle burada.", fontsize=12)
+d2.save(DOC2)
+d2.close()
+w.open_paths([DOC2])
+pump(500)
+check("karşılaştırma öncesi araç kapsülü görünür", w.capsule.isVisible())
+w.act_compare.setChecked(True)
+pump(300)
+check("karşılaştırma modunda araç kapsülü gizli (pasif ama mavi 'numara' kalmıyor)", not w.capsule.isVisible() and w.canvas_stack.currentIndex() == 1)
+check("durum çubuğu: karşılaştırma modu", "Karşılaştırma modu" in w._status_default())
+check("panelde 'Karşılaştırmadan çık' düğmesi var ve görünür", w.diff_panel.btn_exit.isVisible() and "çık" in w.diff_panel.btn_exit.text())
+t0 = time.time()
+while w._diff is None and time.time() - t0 < 20:
+    app.processEvents()
+    time.sleep(0.02)
+check("gerçek karşılaştırma bitti, özet metni var", w._diff is not None and "eklenen" in w.diff_panel.summary.text(), w.diff_panel.summary.text())
+html = w.diff_panel._summary_html(DiffResult(changes=[Change("add", [], []), Change("add", [], []), Change("del", [], []), Change("mod", [], [])]))
+check("özet HTML: +2 −1 ≠1, üç ayrı renk", "+2" in html and "−1" in html and "≠1" in html and len(set(re.findall(r"color:(#[0-9a-fA-F]{6})", html))) == 3, html)
+check("özet HTML: değişiklik yoksa 'Metinler aynı'", "Metinler aynı" in w.diff_panel._summary_html(DiffResult()))
+w.diff_panel.btn_exit.click()
+pump(300)
+check("'Karşılaştırmadan çık': mod kapandı, kapsül geri, tuval tek belge", not w.act_compare.isChecked() and w.capsule.isVisible() and w.canvas_stack.currentIndex() == 0)
+check("çıkınca durum çubuğu araç açıklamasına döner", "Karşılaştırma modu" not in w._status_default())
+w.close_session(len(w.sessions) - 1, confirm=False)
+w.switch_session(0)
+s = w.sessions[0]
+pump(200)
+
+# ====================== O6: düzeltme geri alma (a11y_fix için ayrıntılı test check_convert_a11y_ui'da) ======================
+from models import DocContentCommand
+before = s.pdf.snapshot_bytes()
+s.pdf.doc.set_metadata({"title": "DEGISTI"})
+after = s.pdf.snapshot_bytes()
+s.undo_stack.push(DocContentCommand(s, "Test düzeltmesi", before, after))
+check("DocContentCommand: ilk itme belgeyi bozmaz", (s.pdf.doc.metadata or {}).get("title") == "DEGISTI" and s.pdf.page_count == 4)
+s.undo_stack.undo()
+check("DocContentCommand: geri al eski içeriği getirir (sayfalar sağlam)", (s.pdf.doc.metadata or {}).get("title", "") != "DEGISTI" and texts(s) == ["SAYFA1", "SAYFA2", "SAYFA3", "SAYFA4"])
+s.undo_stack.redo()
+check("DocContentCommand: yinele", (s.pdf.doc.metadata or {}).get("title") == "DEGISTI")
+s.undo_stack.undo()
+
+# ====================== O8 / D1 / D2 / D3: adlar, ikonlar, etiket kuralı ======================
+names_now = {a.text() for a in w.findChildren(QAction)}
+check("yeni adlar var: Fotoğraftan belge tara… / Sayfaları tarayıcıda düzelt… / Sayfa kenarlarını kırp… / Metin farkını göster",
+      {"Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…", "Sayfa kenarlarını kırp…", "Metin farkını göster"} <= names_now)
+check("eski benzer adlar kalmadı", not ({"Belge tara (görsellerden)…", "Bu belgeyi tara/kırp…", "Sayfaları kırp…", "Metin farkını göster (iki sürümü karşılaştır)"} & names_now))
+yardim = next(m for m in w.findChildren(QMenu) if m.title() == "Yardım")
+check("Yardım menüsü yalnız Klavye kısayolları + Hakkında (Birlikte aç yönetimi Tercihler'e taşındı)", [a.text() for a in yardim.actions() if not a.isSeparator()] == ["Klavye kısayolları", "Hakkında"]
+      and not any("Birlikte aç" in t for t in names_now))
+called = []
+w._register_open_with = lambda: called.append("ekle")
+w._unregister_open_with = lambda: called.append("kaldir")
+pd = w.open_preferences()
+pump(300)
+check("Tercihler'de Windows 'Birlikte aç' Ekle/Kaldır düğmeleri", pd.btn_openwith_add.isEnabled() == (sys.platform == "win32"))
+if sys.platform == "win32":
+    pd.btn_openwith_add.click()
+    pd.btn_openwith_del.click()
+    check("düğmeler ana pencere işlevlerini çağırır", called == ["ekle", "kaldir"], str(called))
+pd.close()
+src = open(os.path.join(ROOT, "mw_build.py"), encoding="utf-8").read()
+rows = re.findall(r'A\(\s*(\w+),\s*(None|"[a-z_0-9]+"),\s*"([^"]+)"', src)
+noicon = [t for _, i, t in rows if i == "None"]
+check("tüm menü eylemlerinin ikonu var", not noicon, str(noicon))
+import collections
+use = collections.Counter(i.strip('"') for _, i, _ in rows)
+check("hiçbir ikon 3'ten fazla eylemde kullanılmıyor", max(use.values()) <= 3, str(use.most_common(4)))
+icon_of = {t: i.strip('"') for _, i, t in rows}
+distinct = [("E-postayla gönder…", "mail"), ("Bulut klasörüne kaydet…", "cloud"), ("Dosya konumunu aç", "folder_open"), ("Görselleri PDF'e çevir…", "image_pdf"),
+            ("Her sayfayı ayrı PDF yap…", "split"), ("Tercihler…", "settings"), ("Düzleştir ve kaydet…", "flatten"), ("Word'e dönüştür (.docx)…", "convert"),
+            ("Çıkış", "exit"), ("Gerçek boyut (%100)", "one_to_one")]
+check("önceki çakışan ikonlar ayrıştırıldı (benzersiz, anlamlı)", all(icon_of.get(t) == i for t, i in distinct), str([(t, icon_of.get(t)) for t, i in distinct if icon_of.get(t) != i]))
+unique_icons = [i for _, i in distinct]
+check("ayrıştırılan ikonlar yalnız kendi eyleminde (sepet/ikon yeniden kullanımı yok)", all(use[i] == 1 for i in unique_icons), str({i: use[i] for i in unique_icons}))
+from ui.icons import _PATHS
+check("kullanılan tüm ikon adları ikon setinde", all(i.strip('"') in _PATHS for _, i, _ in rows if i != "None"))
+alltexts = [a.text() for m in menus.values() for a in m.actions() if not a.isSeparator()] + [a.text() for a in w.findChildren(QAction) if a.text()]
+long_ = sorted({t for t in alltexts if len(t) > 40})
+check("menü etiketleri ≤ 40 karakter", not long_, str(long_))
+check("pencere/ek bilgi açan eylemler '…' ile bitiyor, anında çalışanlar bitmiyor (örnekler)",
+      all(t.endswith("…") for t in ("Fotoğraftan belge tara…", "Düzleştir ve kaydet…", "Tercihler…")) and not any(t.endswith("…") for t in ("Sayfayı sil", "Dosya konumunu aç", "Sayfayı kopyala")))
+check("Damga kütüphanesi İmza menüsünde (D3)", any(a.text() == "Damga kütüphanesi…" for a in menus["İmza"].actions()))
 
 # ---- tek ekran görüntüsü: sansür aracı + yumuşak etiketli kutu + özellik çubuğu + durum; yanında Belge menüsü
 w.goto_page(0)

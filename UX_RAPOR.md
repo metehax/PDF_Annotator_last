@@ -1,6 +1,6 @@
 # UX raporu — I5a (yalnız denetim, kod değişikliği yok)
 
-> **Durum (I5b):** K1, K2, O1, O2, O3, O4, O7, O9 **uygulandı** (bkz. README "Kullanılabilirlik iyileştirmeleri", `tests/scripts/check_ux.py`). Açık kalanlar: O5, O6, O8, D1–D6. Bu rapordaki ölçümler uygulama öncesi durumu anlatır.
+> **Durum (I5b):** K1, K2, O1–O9, D1–D3 **uygulandı** (bkz. README "Kullanılabilirlik iyileştirmeleri", `tests/scripts/check_ux.py`). Açık kalanlar: D4 (ilk kullanım turu), D5 (Tercihler notu), D6 (kısayol keşfi / ok tuşu odağı). Bu rapordaki ölçümler uygulama öncesi durumu anlatır.
 
 Tarih: 2026-10-17 · Sürüm: `ebc49fa` sonrası ana dal (I4 dâhil) · Pencere 1500×950, koyu tema, geçici ayar/çalışma klasörü.
 

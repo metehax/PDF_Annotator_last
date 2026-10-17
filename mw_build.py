@@ -199,19 +199,19 @@ class BuildMixin:
         A(m_exp, "image", "Bu sayfayı PNG", lambda: self.export_image_current("png"))
         A(m_exp, "image", "Bu sayfayı JPEG", lambda: self.export_image_current("jpg"))
         A(m_exp, "images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
-        m_share = m_file.addMenu(icon("download"), "Paylaş")
+        m_share = m_file.addMenu(icon("share"), "Paylaş")
         self._doc_controls.append(m_share.menuAction())
-        A(m_share, "file", "E-postayla gönder…", self.share_email)
-        A(m_share, "folder", "Bulut klasörüne kaydet…", self.share_cloud)
-        A(m_share, "folder", "Dosya konumunu aç", self.share_reveal)
+        A(m_share, "mail", "E-postayla gönder…", self.share_email)
+        A(m_share, "cloud", "Bulut klasörüne kaydet…", self.share_cloud)
+        A(m_share, "folder_open", "Dosya konumunu aç", self.share_reveal)
         m_file.addSeparator()
         m_in = m_file.addMenu(icon("scan"), "Tara ve içe aktar")
-        A(m_in, "scan", "Belge tara (görsellerden)…", self.scan_images, needs_doc=False)
-        A(m_in, "images", "Görselleri PDF'e çevir…", self.images_to_pdf, needs_doc=False)
+        A(m_in, "scan", "Fotoğraftan belge tara…", self.scan_images, needs_doc=False)
+        A(m_in, "image_pdf", "Görselleri PDF'e çevir…", self.images_to_pdf, needs_doc=False)
         A(m_in, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
         m_split = m_file.addMenu(icon("merge"), "Birleştir ve böl")
         A(m_split, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
-        A(m_split, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
+        A(m_split, "split", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
         A(m_split, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
         m_file.addSeparator()
         A(m_file, "printer", "Yazdır…", self.print_document, "Ctrl+P")
@@ -221,7 +221,7 @@ class BuildMixin:
         m_file.addSeparator()
         A(m_file, "close", "Sekmeyi kapat", lambda: self.close_session(self.doc_tabbar.currentIndex()),
           "Ctrl+W")
-        A(m_file, None, "Çıkış", self.close, "Ctrl+Q", needs_doc=False)
+        A(m_file, "exit", "Çıkış", self.close, "Ctrl+Q", needs_doc=False)
 
         m_edit = QMenu("Düzenle", self)
         self.act_undo = self.undo_group.createUndoAction(self, "Geri al")
@@ -244,12 +244,12 @@ class BuildMixin:
         m_edit.addSeparator()
         A(m_edit, "search", "Bul…", self._focus_search, "Ctrl+F")
         A(m_edit, "sliders", "Komut paleti…", self.open_palette, "Ctrl+K", needs_doc=False)
-        A(m_edit, "sliders", "Tercihler…", self.open_preferences, "Ctrl+,", needs_doc=False)
+        A(m_edit, "settings", "Tercihler…", self.open_preferences, "Ctrl+,", needs_doc=False)
 
         m_view = QMenu("Görünüm", self)
         A(m_view, "zoom_in", "Yakınlaştır", lambda: self.view.animate_zoom(self.view.zoom() * 1.25), "Ctrl+=")
         A(m_view, "zoom_out", "Uzaklaştır", lambda: self.view.animate_zoom(self.view.zoom() / 1.25), "Ctrl+-")
-        A(m_view, None, "Gerçek boyut (%100)", lambda: self.view.animate_zoom(1.0), "Ctrl+1")
+        A(m_view, "one_to_one", "Gerçek boyut (%100)", lambda: self.view.animate_zoom(1.0), "Ctrl+1")
         A(m_view, "fit_width", "Genişliğe sığdır", self.fit_width, "Ctrl+2")
         A(m_view, "fit_page", "Tam sayfa", self.fit_page, "Ctrl+0")
         m_view.addSeparator()
@@ -264,14 +264,14 @@ class BuildMixin:
         self.act_redact_final.setChecked(RedactionAnnotation.final_view)
         self.act_compare = A(m_view, "compare", "Karşılaştırma modu", self.toggle_compare_mode,
                              checkable=True)
-        A(m_view, "compare", "Metin farkını göster (iki sürümü karşılaştır)", self.compare_documents)
+        A(m_view, "compare", "Metin farkını göster", self.compare_documents)
         A(m_view, "chevron_down", "Sonraki metin değişikliği", lambda: self.diff_panel.step(1), "F8")
         A(m_view, "chevron_up", "Önceki metin değişikliği", lambda: self.diff_panel.step(-1), "Shift+F8")
         m_view.addSeparator()
         A(m_view, "moon", "Açık / koyu tema", self.toggle_theme, "Ctrl+Shift+L", needs_doc=False)
 
         m_doc = QMenu("Belge", self)
-        m_pg = m_doc.addMenu(icon("file_plus"), "Sayfa")
+        m_pg = m_doc.addMenu(icon("pages"), "Sayfa")
         self._doc_controls.append(m_pg.menuAction())
         A(m_pg, "file_plus", "Sonrasına boş sayfa ekle", lambda: self._insert_blank_page(page() + 1))
         A(m_pg, "file_copy", "Sayfayı kopyala", lambda: self._duplicate_page(page()))
@@ -281,7 +281,7 @@ class BuildMixin:
         A(m_pg, "rotate_ccw", "Saatin tersine döndür", lambda: self._rotate_current_page(-90),
           "Ctrl+Shift+R")
         m_pg.addSeparator()
-        A(m_pg, "crop", "Sayfaları kırp…", self.open_crop_pages)
+        A(m_pg, "crop", "Sayfa kenarlarını kırp…", self.open_crop_pages)
         m_hf = m_doc.addMenu(icon("headfoot"), "Numara, üstbilgi ve filigran")
         self._doc_controls.append(m_hf.menuAction())
         A(m_hf, "headfoot", "Sayfa numarası, üstbilgi ve altbilgi…",
@@ -289,12 +289,12 @@ class BuildMixin:
         A(m_hf, "number", "Bates numaralandır…", lambda: self.save_pdf_with_headfoot(True))
         A(m_hf, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
         A(m_doc, "ocr", "OCR (metin tanıma)…", self.open_ocr_dialog)
-        m_cv = m_doc.addMenu(icon("download"), "Dönüştür ve düzleştir")
+        m_cv = m_doc.addMenu(icon("convert"), "Dönüştür ve düzleştir")
         self._doc_controls.append(m_cv.menuAction())
-        A(m_cv, "download", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
+        A(m_cv, "convert", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
         A(m_cv, "calc", "Excel'e dönüştür (tablolar, .xlsx)…", lambda: self.open_convert("xlsx"))
-        A(m_cv, "layers", "Düzleştir ve kaydet…", self.open_flatten)
-        A(m_cv, "scan", "Bu belgeyi tara/kırp…", self.scan_document)
+        A(m_cv, "flatten", "Düzleştir ve kaydet…", self.open_flatten)
+        A(m_cv, "scan", "Sayfaları tarayıcıda düzelt…", self.scan_document)
         m_sec = m_doc.addMenu(icon("lock"), "Güvenlik ve gizlilik")
         self._doc_controls.append(m_sec.menuAction())
         A(m_sec, "lock", "Parola koruması…", self.open_password)
@@ -308,7 +308,7 @@ class BuildMixin:
         m_form = QMenu("Form", self)
         A(m_form, "form", "Formlar paneli", lambda: self.side.show_page("forms"))
         A(m_form, "plus", "Yeni form alanı (araç)", lambda: self._tool_shortcut("form"))
-        A(m_form, "sliders", "Seçili alanın özellikleri…",
+        A(m_form, "edit_text", "Seçili alanın özellikleri…",
           lambda: self.edit_form_field(self.forms_panel.current_field()))
         A(m_form, "trash", "Seçili alanı sil",
           lambda: self.delete_form_field(self.forms_panel.current_field()))
@@ -328,11 +328,6 @@ class BuildMixin:
         m_help = QMenu("Yardım", self)
         A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
         m_help.addSeparator()
-        A(m_help, "file", "Windows'ta 'Birlikte aç' listesine ekle…", self._register_open_with,
-          needs_doc=False)
-        A(m_help, "close", "'Birlikte aç' listesinden kaldır", self._unregister_open_with,
-          needs_doc=False)
-        m_help.addSeparator()
         A(m_help, "app", "Hakkında", self._show_about, needs_doc=False)
 
         # sağ üstteki "Dışa Aktar" düğmesinin menüsü
@@ -340,9 +335,9 @@ class BuildMixin:
         for entry in (
             ("file", "PDF olarak kaydet…", self.save_pdf),
             ("compress", "Sıkıştırarak kaydet…", self.save_compressed),
-            ("image", "Resim olarak kaydet (orijinal çözünürlük)", self.save_as_image),
+            ("image", "Resim olarak kaydet (orijinal boyut)", self.save_as_image),
             ("watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark),
-            ("headfoot", "Sayfa numaralı / üstbilgili PDF olarak kaydet…",
+            ("headfoot", "Numaralı / üstbilgili PDF kaydet…",
              lambda: self.save_pdf_with_headfoot(False)),
             ("headfoot", "Bates numaralı PDF olarak kaydet…", lambda: self.save_pdf_with_headfoot(True)),
             None,
@@ -567,6 +562,7 @@ class BuildMixin:
         self.diff_panel.changeActivated.connect(self._goto_change)
         self.diff_panel.refreshRequested.connect(self._run_diff)
         self.diff_panel.filtersChanged.connect(self._apply_diff_marks)
+        self.diff_panel.exitRequested.connect(lambda: self.act_compare.setChecked(False))
         self._diff: Optional[textdiff.DiffResult] = None
         self._diff_task: Optional[_OcrTask] = None
         self._diff_token = 0

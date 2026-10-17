@@ -199,7 +199,7 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   proje olarak kaydetmek belgeyi "kaydedildi" sayar.
 * **Birlikte aç:** `main_window.py dosya.pdf` ile açılabilir; uygulama açıkken
   yeni dosyalar mevcut pencereye gönderilir. Yardım menüsündeki
-  "Windows'ta 'Birlikte aç' listesine ekle" yalnızca kullanıcı hesabınız için
+  **Tercihler → Windows → Birlikte aç → Ekle…** yalnızca kullanıcı hesabınız için
   kayıt yapar (HKCU), varsayılan uygulamanızı değiştirmez; aynı menüden kaldırılabilir.
 * Pencere boyutu/konumu ve kenar paneli durumu bir sonraki açılışta hatırlanır.
 
@@ -389,7 +389,7 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   Bağlantı şifrelenmez (HTTP), bu yüzden yalnızca güvendiğiniz ağda kullanın. iPhone'da HEIC yerine "En uyumlu" (JPEG) biçimi gerekir.
 
 ## Yeni: Belge tarama
-**Dosya → Belge tara (görsellerden)…** fotoğrafları (ya da PDF'leri), **Belge → Bu belgeyi tara/kırp…** açık belgenin sayfalarını (200 dpi) tarama penceresinde açar.
+**Dosya → Tara ve içe aktar → Fotoğraftan belge tara…** fotoğrafları (ya da PDF'leri), **Belge → Dönüştür ve düzleştir → Sayfaları tarayıcıda düzelt…** açık belgenin sayfalarını (200 dpi) tarama penceresinde açar.
 
 * **Köşeler:** kâğıt otomatik bulunur; 4 kulpu sürükleyerek ayarlayın (**Otomatik algıla**, **Tüm görsel**). **Sonuç** sekmesi düzeltilmiş görüntüyü gösterir.
 * **Filtre:** orijinal, otomatik, belge (gölgesiz siyah-beyaz), gri, canlı, gölgesiz renkli; parlaklık/kontrast ve ↺ ↻ döndürme. Her sayfanın ayarı ayrıdır.
@@ -461,3 +461,10 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   (yinele), **F11** tam ekran, **Ctrl+Tab / Ctrl+Shift+Tab** belge sekmeleri. Birden çok seçili işareti silme artık hepsini siler (önceden yalnız ilkini siliyordu).
 * **Özellik çubuğu** artık sayfanın ilk satırlarını örtmez (tuval çubuğun altından başlar). **Belge tara** penceresi: filtre kartları 3×2 ve iç kaydırmasız, "Bu sayfayı sıfırla"
   üst çubukta her zaman görünür, **DÜZELTME** bölümü katlanır, pencere ekrana göre boyutlanır.
+* **Karşılaştırma modu (I5b-2):** araç kapsülü gizlenir (araçlar zaten pasifti); panelin üstünde **Karşılaştırmadan çık** düğmesi; özet satırı renkli
+  (+eklenen yeşil, −silinen kırmızı, ≠değişen sarı).
+* **Erişilebilirlik düzeltmeleri geri alınabilir:** dil/başlık/yer imi ve OCR düzeltmeleri **Ctrl+Z / Ctrl+Y** ile geri alınır (tek adım; çok büyük belgelerde — 200 MB üstü — bellek
+  için anlık görüntü alınmaz).
+* **Adlar ve ikonlar:** benzer adlar ayrıştırıldı ("Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…", "Sayfa kenarlarını kırp…", "Metin farkını göster"); menü
+  eylemlerinin hepsinde ikon var ve hiçbir ikon 3'ten fazla eylemde tekrar etmiyor (yeni ikonlar: posta, bulut, klasör aç, ayarlar, dönüştür, böl…); etiketler ≤ 40 karakter.
+  **Birlikte aç** yönetimi Yardım'dan Tercihler'e taşındı.

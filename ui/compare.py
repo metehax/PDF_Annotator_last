@@ -45,6 +45,7 @@ def html_to_pdf(html_text: str, path: str) -> int:
 class CompareDiffPanel(QWidget):
     changeActivated = Signal(object)           # Change
     refreshRequested = Signal()
+    exitRequested = Signal()
     filtersChanged = Signal()
 
     def __init__(self, parent=None):
@@ -57,6 +58,12 @@ class CompareDiffPanel(QWidget):
         v = QVBoxLayout(self)
         v.setContentsMargins(6, 4, 6, 6)
         v.setSpacing(6)
+
+        self.btn_exit = QPushButton(icon("close"), "Karşılaştırmadan çık")
+        self.btn_exit.setObjectName("secondary")
+        self.btn_exit.setToolTip("Tek belge görünümüne döner")
+        self.btn_exit.clicked.connect(self.exitRequested.emit)
+        v.addWidget(self.btn_exit)
 
         self.summary = QLabel("")
         self.summary.setObjectName("hint")
@@ -115,6 +122,16 @@ class CompareDiffPanel(QWidget):
         v.addWidget(self.btn_report)
         self._sync_buttons()
 
+    @staticmethod
+    def _summary_html(res: DiffResult) -> str:
+        """Özet satırı: sayılar renkli ve kalın (eklenen yeşil, silinen kırmızı, değişen sarı)."""
+        if not res.changes:
+            return f"<b style='color:{theme.current()['good']}'>Metinler aynı</b>"
+        t = theme.current()
+        return (f"<span style='font-size:13px'><b style='color:{t['good']}'>+{res.count('add')}</b> eklenen · "
+                f"<b style='color:{t['danger']}'>−{res.count('del')}</b> silinen · "
+                f"<b style='color:{t['warning']}'>≠{res.count('mod')}</b> değişen</span>")
+
     # -- durum ---------------------------------------------------------------
     @property
     def ignore_case(self) -> bool:
@@ -158,7 +175,7 @@ class CompareDiffPanel(QWidget):
         if res is None:
             return
         kinds = self.kinds()
-        self.summary.setText(res.summary())
+        self.summary.setText(self._summary_html(res))
         pages = {}
         for c in res.changes:
             if c.kind in kinds:

@@ -196,7 +196,7 @@ class MainWindow(
         for _, b in self._tool_buttons:
             b.setEnabled(on)
         self.center_stack.setCurrentIndex(1 if on else 0)
-        self.capsule.setVisible(on)
+        self.capsule.setVisible(on and not self.act_compare.isChecked())
         for b in self.side.page_buttons():
             b.setEnabled(on)
         if on and not self.side.is_open() and self._side_was_open:

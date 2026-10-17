@@ -80,7 +80,7 @@ def pump(until=None, limit=60000, ms=100):
 
 
 texts = [a.text() for a in w.findChildren(QAction)]
-for t in ("Belge tara (görsellerden)…", "Bu belgeyi tara/kırp…"):
+for t in ("Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…"):
     check(f"menü: {t}", t in texts)
 
 # --- pencere + otomatik kose

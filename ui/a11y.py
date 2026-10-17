@@ -20,6 +20,7 @@ from PySide6.QtWidgets import (
 import a11y
 import ocr
 from ui import theme
+from models import DocContentCommand
 from ui.convert import BackgroundJob
 from ui.icons import icon
 
@@ -79,7 +80,7 @@ class A11yDialog(QDialog):
         grid.addWidget(self.title_edit, 1, 1)
         grid.setColumnStretch(1, 1)
         v.addLayout(grid)
-        self.note = QLabel("Düzeltmeler Ctrl+Z ile geri alınamaz; kaydetmeden önce gözden geçirin. "
+        self.note = QLabel("Düzeltmeler Düzenle → Geri al (Ctrl+Z) ile geri alınabilir; kaydetmeden önce gözden geçirin. "
                            "OCR, taranmış sayfaları metinli sayfalarla değiştirir.")
         self.note.setObjectName("hint")
         self.note.setWordWrap(True)
@@ -191,6 +192,7 @@ class A11yDialog(QDialog):
             return
         simple = [k for k in keys if k != "ocr"]
         done = []
+        self._snap_before = self._take_snapshot()           # tüm düzeltmeler tek adımda geri alınabilsin
         if simple:
             code = self.lang.currentData() or self.lang.currentText().split("—")[0].strip()
             toc = rep.get("headings").data.get("toc") if rep.get("headings") else None
@@ -245,8 +247,29 @@ class A11yDialog(QDialog):
         self._job.signals.failed.connect(self._on_failed)
         self._job.start()
 
+    UNDO_SNAPSHOT_MAX = 200 * 1024 * 1024        # bundan büyük belgelerde anlık görüntü alınmaz (bellek)
+
+    def _take_snapshot(self):
+        try:
+            data = self._s.pdf.snapshot_bytes()
+        except Exception:
+            return None
+        return data if len(data) <= self.UNDO_SNAPSHOT_MAX else None
+
+    def _push_undo(self):
+        before, self._snap_before = getattr(self, "_snap_before", None), None
+        s = self._s
+        if before is None or s not in getattr(self._main, "sessions", []):
+            return False
+        after = self._take_snapshot()
+        if after is None:
+            return False
+        s.undo_stack.push(DocContentCommand(s, "Erişilebilirlik düzeltmeleri", before, after, on_change=self._on_changed))
+        return True
+
     def _finish(self, done):
         if done:
+            self._push_undo()
             self._on_changed()
             self._main.toasts.show("Düzeltildi: " + "; ".join(done), "success")
         self.rescan()

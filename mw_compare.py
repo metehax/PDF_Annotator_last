@@ -23,6 +23,8 @@ class CompareMixin:
     def toggle_compare_mode(self, checked):
         self.status.reset()
         self.canvas_stack.setCurrentIndex(1 if checked else 0)
+        # karşılaştırmada araç kapsülü anlamsız (araçlar pasif, "numara" mavi kalıyordu): gizle
+        self.capsule.setVisible(not checked and self.active_session is not None)
         for key, b in self._tool_buttons:
             if checked:
                 b.setEnabled(key == "number")
