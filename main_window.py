@@ -64,6 +64,7 @@ from ui.comments import CommentsPanel, ask_note_text
 from ui.a11y import A11yDialog
 from ui.compare import CompareDiffPanel
 from ui.convert import ConvertDialog
+from ui.share import ShareDialog
 import textdiff
 import forms
 from ui.formui import FormFieldDialog, FormFieldEditor, FormsPanel
@@ -852,6 +853,7 @@ class MainWindow(QMainWindow):
         A(m_exp, "image", "Bu sayfayı JPEG", lambda: self.export_image_current("jpg"))
         A(m_exp, "images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
         m_file.addSeparator()
+        A(m_file, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
         A(m_file, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
         A(m_file, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
         A(m_file, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
@@ -3753,6 +3755,18 @@ class MainWindow(QMainWindow):
 
         SecurityCheckDialog(self, s, cleaned).exec()
 
+    # -- Telefonla aktar (QR) ---------------------------------------------------
+    def open_share(self):
+        """Yerel ağda geçici sunucu + QR penceresi (tek örnek); pencere kapanınca sunucu durur."""
+        dlg = getattr(self, "_share_dialog", None)
+        if dlg is not None and dlg.isVisible():
+            dlg.raise_()
+            dlg.activateWindow()
+            return dlg
+        dlg = self._share_dialog = ShareDialog(self)
+        dlg.show()
+        return dlg
+
     # -- Word / Excel dönüştürme ve erişilebilirlik ---------------------------
     def open_convert(self, fmt: str = "docx"):
         s = self.active_session
@@ -4470,6 +4484,9 @@ class MainWindow(QMainWindow):
             if not self._confirm_discard(s):
                 event.ignore()
                 return
+        share = getattr(self, "_share_dialog", None)
+        if share is not None:
+            share.close()                        # telefon aktarım sunucusu durur
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("sidePanelOpen", self.side.is_open() or not self.sessions and self._side_was_open)
         for s in self.sessions:

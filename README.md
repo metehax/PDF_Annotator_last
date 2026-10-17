@@ -55,6 +55,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
 | `convert.py`    | **PDF → Word** (pdf2docx) ve **PDF → Excel** (PyMuPDF `find_tables` + openpyxl) çekirdeği |
 | `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
+| `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno) |
+| `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
 | `ui/a11y.py`    | Erişilebilirlik raporu penceresi: kontrol listesi, tek tıkla düzeltme, rapor kaydı |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
@@ -356,3 +358,20 @@ arka planda yapılır; kapsam tüm belge ya da yalnız geçerli sayfadır. Çık
 Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlenebilir. Düzeltmeler açık belgeye uygulanır
 (Ctrl+Z ile geri alınmaz) ve kaydedince PDF'e yansır. OCR, taranmış sayfanın görüntüsünü yeniden kodlar ve o sayfadaki
 özgün bağlantı/form alanlarını taşımaz. **Raporu kaydet…** HTML ya da TXT yazar. Denetim belgenin kopyasında çalışır, arayüz donmaz.
+
+## Yeni: Telefonla aktar (QR)
+
+**Dosya → Telefonla aktar (QR)…** yerel ağda geçici bir web sayfası açar ve QR'ını gösterir; ek uygulama gerekmez.
+
+* **Telefondan bilgisayara:** QR'ı telefonun kamerasıyla okutun; açılan sayfada **Dosya veya fotoğraf seç** ya da **Kamerayla çek**
+  düğmesi vardır (birden çok dosya, ilerleme çubuğu). Gelen dosya `Belgelerim\PDF Annotator Gelen` klasörüne kaydedilir
+  (**Klasör…** ile değişir) ve uygulamada açılır ("Gelen dosyaları otomatik aç" kapatılabilir; listeden çift tıklayınca da açılır).
+* **Bilgisayardan telefona:** **Açık belgeyi telefona sun**, açık belgeyi işaretleriyle birlikte PDF olarak sunar; telefondaki
+  sayfanın "Bilgisayardan indir" bölümünde birkaç saniye içinde görünür. Belgeyi değiştirdiyseniz yeniden sunun.
+* **Güvenlik:** adresin içinde her açılışta yeni, rastgele (128 bit) bir anahtar vardır; anahtarsız ya da yanlış istek 404 alır.
+  Sunucu yalnızca seçili yerel adrese bağlanır (birden çok ağ varsa pencereden seçilir). Yalnızca **PDF ve resim** kabul edilir
+  (uzantı + dosya imzası denetlenir; `.exe` vb. reddedilir), dosya adı temizlenir (yol geçişi, Windows'ta yasak adlar),
+  dosya başına 200 MB, oturum başına 100 dosya / 1 GB sınırı vardır; yarım yüklemeler kaydedilmez.
+* **Durma:** pencere kapanınca, uygulama kapanınca ya da 15 dk boşta kalınca sunucu durur; sunulan geçici dosyalar silinir.
+* **Notlar:** telefon ve bilgisayar aynı Wi‑Fi ağında olmalı; bağlanamazsa Windows Güvenlik Duvarı'nda "özel ağlar"a izin verin.
+  Bağlantı şifrelenmez (HTTP), bu yüzden yalnızca güvendiğiniz ağda kullanın. iPhone'da HEIC yerine "En uyumlu" (JPEG) biçimi gerekir.
