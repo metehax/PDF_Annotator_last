@@ -283,6 +283,9 @@ QSplitter::handle {{ background:{t['border']}; }}
     padding:2px 2px 4px 2px; }}
 #propPage {{ background:{t['surface']}; }}
 #propTitle {{ color:{t['text']}; font-size:14px; font-weight:600; }}
+QLabel#scanCanvas {{ background:{t['canvas']}; color:{t['text_faint']}; border-radius:8px; }}
+QListWidget#scanFilters::item, QListWidget#scanStrip::item {{ padding:3px; }}
+QListWidget#scanFilters::item:selected, QListWidget#scanStrip::item:selected {{ background:{t['accent_soft']}; border:1px solid {t['accent']}; }}
 #hint {{ color:{t['text_faint']}; font-size:12px; }}
 #hintWarn {{ color:{t['text_muted']}; font-size:12px; background:{t['warning_soft']};
     border-left:3px solid {t['warning']}; border-radius:6px; padding:8px 10px; }}

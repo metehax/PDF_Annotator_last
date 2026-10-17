@@ -65,6 +65,7 @@ from ui.a11y import A11yDialog
 from ui.compare import CompareDiffPanel
 from ui.convert import ConvertDialog
 from ui.share import ShareDialog
+from ui.scanner import ScanDialog, pdf_sources
 import textdiff
 import forms
 from ui.formui import FormFieldDialog, FormFieldEditor, FormsPanel
@@ -854,6 +855,7 @@ class MainWindow(QMainWindow):
         A(m_exp, "images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
         m_file.addSeparator()
         A(m_file, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
+        A(m_file, "scan", "Belge tara (görsellerden)…", self.scan_images, needs_doc=False)
         A(m_file, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
         A(m_file, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
         A(m_file, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
@@ -922,6 +924,7 @@ class MainWindow(QMainWindow):
         A(m_doc, "info", "Belge bilgileri…", self.open_doc_info, "Ctrl+D")
         A(m_doc, "lock", "Parola koruması…", self.open_password)
         A(m_doc, "shield", "Güvenlik denetimi…", self.open_security_check)
+        A(m_doc, "scan", "Bu belgeyi tara/kırp…", self.scan_document)
         A(m_doc, "eye", "Erişilebilirlik denetimi…", self.open_a11y)
         A(m_doc, "download", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
         A(m_doc, "calc", "Excel'e dönüştür (tablolar, .xlsx)…", lambda: self.open_convert("xlsx"))
@@ -3764,6 +3767,36 @@ class MainWindow(QMainWindow):
             dlg.activateWindow()
             return dlg
         dlg = self._share_dialog = ShareDialog(self)
+        dlg.show()
+        return dlg
+
+    # -- Belge tarama -----------------------------------------------------------
+    def scan_images(self, paths=None):
+        """Görsellerden (ya da PDF'lerden) tarama penceresi; yol verilmezse dosya seçtirir."""
+        if not paths:
+            flt = "Görsel ve PDF (" + " ".join("*" + e for e in IMAGE_EXTS) + " *.pdf)"
+            paths, _ = QFileDialog.getOpenFileNames(self, "Taranacak dosyalar", "", flt)
+        if not paths:
+            return None
+        dlg = self._scan_dialog = ScanDialog(self, list(paths))
+        dlg.show()
+        return dlg
+
+    def scan_document(self):
+        """Açık belgenin sayfalarını (200 dpi) tarama penceresinde aç: kırp, temizle, yeniden PDF yap."""
+        s = self.active_session
+        if not s:
+            self.toasts.show("Önce bir belge açın.", "info")
+            return None
+        try:
+            snap = s.pdf._annotated_copy(s.annotations, self.font_ctx)
+            data = snap.write()
+            snap.close()
+            srcs = pdf_sources(data, os.path.basename(s.path) if s.path else "belge")
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Belge hazırlanamadı:\n{ex}")
+            return None
+        dlg = self._scan_dialog = ScanDialog(self, srcs, start=s.current_page)
         dlg.show()
         return dlg
 

@@ -56,6 +56,7 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `convert.py`    | **PDF → Word** (pdf2docx) ve **PDF → Excel** (PyMuPDF `find_tables` + openpyxl) çekirdeği |
 | `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
 | `scan.py`       | **Belge tarama** çekirdeği (OpenCV, arayüzsüz): fotoğraftan kâğıt köşelerini bulma, perspektif düzeltme, döndürme, 6 filtre (orijinal/otomatik/belge/gri/canlı/gölgesiz renkli), sayfaları PDF'e aktarma. Arayüzü G2'de |
+| `ui/scanner.py` | **Belge tara** penceresi: köşe kulpları (otomatik + elle), filtre kartları, parlaklık/kontrast, döndür, sayfa şeridi, PDF/OCR üretimi |
 | `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno) |
 | `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
@@ -376,3 +377,11 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 * **Durma:** pencere kapanınca, uygulama kapanınca ya da 15 dk boşta kalınca sunucu durur; sunulan geçici dosyalar silinir.
 * **Notlar:** telefon ve bilgisayar aynı Wi‑Fi ağında olmalı; bağlanamazsa Windows Güvenlik Duvarı'nda "özel ağlar"a izin verin.
   Bağlantı şifrelenmez (HTTP), bu yüzden yalnızca güvendiğiniz ağda kullanın. iPhone'da HEIC yerine "En uyumlu" (JPEG) biçimi gerekir.
+
+## Yeni: Belge tarama
+**Dosya → Belge tara (görsellerden)…** fotoğrafları (ya da PDF'leri), **Belge → Bu belgeyi tara/kırp…** açık belgenin sayfalarını (200 dpi) tarama penceresinde açar.
+
+* **Köşeler:** kâğıt otomatik bulunur; 4 kulpu sürükleyerek ayarlayın (**Otomatik algıla**, **Tüm görsel**). **Sonuç** sekmesi düzeltilmiş görüntüyü gösterir.
+* **Filtre:** orijinal, otomatik, belge (gölgesiz siyah-beyaz), gri, canlı, gölgesiz renkli; parlaklık/kontrast ve ↺ ↻ döndürme. Her sayfanın ayarı ayrıdır.
+* **Sayfa şeridi:** sayfa ekle/sil, ◀ ▶ ya da sürükleyerek sırala.
+* **PDF oluştur…:** A4 / Letter / orijinal oran, JPEG kalitesi, isteğe bağlı **Aranabilir yap (OCR)**; iş arka planda çalışır, **Durdur** ile iptal edilir, sonuç yeni sekmede açılır.
