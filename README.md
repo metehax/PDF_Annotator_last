@@ -55,6 +55,7 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
 | `convert.py`    | **PDF → Word** (pdf2docx) ve **PDF → Excel** (PyMuPDF `find_tables` + openpyxl) çekirdeği |
 | `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
+| `scan.py`       | **Belge tarama** çekirdeği (OpenCV, arayüzsüz): fotoğraftan kâğıt köşelerini bulma, perspektif düzeltme, döndürme, 6 filtre (orijinal/otomatik/belge/gri/canlı/gölgesiz renkli), sayfaları PDF'e aktarma. Arayüzü G2'de |
 | `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno) |
 | `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |

@@ -20,6 +20,7 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 | `convert.py` | PDF→Word/Excel çekirdeği (arayüzsüz): `to_docx(bytes, out, pages, cancelled)` (pdf2docx), `find_tables` + `write_xlsx` + `to_xlsx(..., numbers, decimal)` (PyMuPDF `find_tables` + openpyxl), `parse_number`; hata `ConvertError`, iptal `Cancelled`, sonuç `ConvertResult` |
 | `a11y.py` | Erişilebilirlik çekirdeği (arayüzsüz): `audit(doc, path, cancelled)` → `A11yReport` (`Check`: key/status pass·warn·fail·info/`fix`/`data`), `apply_fixes(doc, ['lang','title','bookmarks'], ...)`, `ocr_replace_pages`, `detect_headings`, `report_text/html` |
 | `qrshare.py` | QR/telefon aktarımı çekirdeği (arayüzsüz, yalnız stdlib `http.server` + segno): `ShareServer(receive_dir, on_received, host, port, max_bytes, token)` → `start/stop/url/offer/clear_offers/listing/idle_seconds`, `qr_png(url)`, `lan_addresses()`, `sanitize_filename`, `unique_path`, `PAGE` (telefon sayfası). Yollar: `/<anahtar>/` sayfa, `up` (POST, ham gövde + `X-Filename`), `list`, `d/<i>` |
+| `scan.py` | Belge tarama çekirdeği (arayüzsüz, OpenCV+numpy): görüntü = `(h,w,3)` RGB uint8. `load_image` (EXIF, ≤3000 px), `detect_corners(img, fallback=True)` → SÖ,SaÖ,SaA,SA ya da tüm kare/`None`, `order_points`, `warp`, `rotate(img, derece)` (saat yönü), `apply_filter(img, ad, parlaklik, kontrast)` (`FILTERS`; `belge` yalnız 0/255), `to_pdf(sayfalar, out_path, sayfa_boyutu, kenar_bosluk_pt, jpeg_kalite)` (yol → dosya, yoksa `fitz.Document`) |
 | `ocr.py`, `fonts.py`, `gizmo.py` | OCR (Tesseract, `tessdata/`), yazı tipleri, boyutlandırma kulpları |
 | `ui/theme.py` | Renk belirteçleri (`current()`, `qcolor()`), QSS — yeni objectName stillerini buraya ekle |
 | `ui/icons.py` | Kendi SVG ikon seti: `icon(name, role)`; yeni ikon = `_PATHS`'e 24×24 çizgi SVG |
@@ -72,5 +73,6 @@ C1 tamam (form doldurma/sıfırlama/oluşturma, hesaplanan alan, Ctrl+P yazdırm
 C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğrulama) · E tamam (görsel iş akışı: adım zinciri + şablon + açık belge/dosyalar/klasör, ilerleme/durdurma/rapor) ·
 D1 tamam (iki sürümün metin farkı: yeşil/kırmızı vurgu, sayfa sayfa liste, listeden git) ·
 D2 tamam (Word/Excel dönüştürme, erişilebilirlik denetimi + tek tıkla düzeltme; pdf2docx ve openpyxl `requirements.txt`'te) ·
-F tamam (QR ile telefondan dosya alma + açık belgeyi telefona sunma; segno `requirements.txt`'te).
+F tamam (QR ile telefondan dosya alma + açık belgeyi telefona sunma; segno `requirements.txt`'te) ·
+G1 tamam (`scan.py` tarama çekirdeği; opencv-python-headless + numpy `requirements.txt`'te; arayüz G2'de).
 **Sıradaki aşamalar (G1…K) ve her biri için hazır istem: `YOLHARITASI.md`** — yeni sohbette yalnızca ilgili aşama bölümünü oku.

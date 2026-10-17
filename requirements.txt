@@ -5,3 +5,5 @@ pyhanko>=0.25
 pdf2docx>=0.5.8
 openpyxl>=3.1
 segno>=1.6
+numpy>=1.26
+opencv-python-headless>=4.9
