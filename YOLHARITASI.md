@@ -1,7 +1,7 @@
 # Yol haritası — sıradaki aşamalar
 
-Sıra: **G1 → G2 → G3 → H1 → H2 → J1 → J2 → J3 → K**. Her aşama ayrı sohbette, ayrı commit'te yapılır.
-Tamamlananlar: B, C1, C2, D1, D2, E, F, testlerin repoya alınması (bkz. `CLAUDE.md`).
+Sıra: **I1 → I2 → I3 → I4 → I5 (I5a, I5b) → K1 → K2 → K3**. Her aşama ayrı sohbette, ayrı commit'te yapılır (J bölünmesi bitti: kod mw_*.py dosyalarında, küçük okumalar yeter).
+Tamamlananlar: B, C1, C2, D1, D2, E, F, G1–G3, H1, H2, J1–J3, testler. Eski G1–J3 bölümleri yalnızca kayıt içindir; yeniden okumaya gerek yok.
 
 ## Token tasarrufu kuralları (her sohbette geçerli)
 1. `CLAUDE.md` zaten yüklenir. Bu dosyadan **yalnızca ilgili aşama bölümünü** oku (`Grep "^## G2" -A 40`); dosyayı bütün okuma.
@@ -65,7 +65,72 @@ Tamamlananlar: B, C1, C2, D1, D2, E, F, testlerin repoya alınması (bkz. `CLAUD
 - **J3:** kalan büyük bloklar (menü kurulumu, dışa aktarma) ve `CLAUDE.md` yapı tablosunu güncelle; `main_window.py` hedef < 1500 satır.
 **Bitti ölçütü:** pytest yeşil, `pyflakes` temiz, uygulama açılır (tek elle deneme).
 
-## K — Paketleme (PyInstaller)
-**Yapılacak:** `pdfannotator.spec` (one-folder), `build.bat`; `datas`: `tessdata/`, `fonts/`, `ui` varlıkları; `hiddenimports`: pdf2docx, pyhanko, segno, openpyxl, cv2; gereksizleri hariç tut (tkinter, matplotlib…); uygulama simgesi; çıktıyı `dist/PDF Annotator/`. İsteğe bağlı: Inno Setup betiği (kurucu + masaüstü kısayolu).
-**Notlar:** boyut büyük olacak (PySide6 + OpenCV; yüzlerce MB), antivirüs yanlış alarmı olabilir (kodu imzalamak ayrı konu), `onefile` yavaş açılır — `onedir` öner.
-**Bitti ölçütü:** `build.bat` çalışır, `dist` içindeki exe temiz bir klasörde açılır, bir PDF açıp OCR/kaydet denenir (tek elle deneme); `README`'de "Kurulum (exe)" bölümü.
+## I1 — Tercihler penceresi + çalışma klasörü + otomatik kurtarma
+**Mevcut durum:** Tercihler penceresi yok; ayarlar `QSettings`'te dağınık (`recent`, `qrReceiveDir`, geometri…). QR gelenleri `Belgeler\PDF Annotator Gelen`'e, diğer çıktılar her diyalogda ayrı yola gider. Otomatik kurtarma yok.
+**Yapılacak**
+- `workspace.py` (arayüzsüz): `root()` (varsayılan `Belgeler\PDF Annotator`, ayardan okunur), `sub(ad)` → alt klasörü oluşturup döndürür (`Gelen`, `Taramalar`, `Donusturulenler`, `Projeler`, `Yedekler`, `IsAkisi`), `migrate_old_inbox()` (eski `PDF Annotator Gelen` varsa taşımayı öner, sessizce silme).
+- `ui/preferences.py` `PreferencesDialog` (Düzenle → Tercihler…, Ctrl+,): **Çalışma klasörü** (seç/aç/sıfırla), "Çıktıları buraya kaydet" kutuları (QR gelenleri, tarama PDF'leri, Word/Excel dönüşümleri, iş akışı varsayılan hedefi, proje JSON), **Otomatik kurtarma** (aç/kapa, süre: 1–10 dk), tema, "Son klasörü hatırla". Güncelleme bölümü K3'te eklenecek (şimdilik yer tutucu bırakma).
+- Otomatik kurtarma: değişmiş (`dirty`) oturumlar için `Yedekler\kurtarma\<id>.json/.pdf` taslağı (işaretler + belge baytları); açılışta "Kapanmayan belgeler bulundu, kurtarılsın mı?"; normal kapanış/kaydetme taslağı siler.
+- Mevcut diyalogların varsayılan klasörlerini `workspace.sub()`'a bağla (ScanDialog, ConvertDialog, ShareDialog, WorkflowDialog "Kaydet" adımı, proje kaydet/aç).
+**Yeniden kullan:** `QSettings` (`self.settings`), `ui/share.default_receive_dir`, `mw_*` içindeki kaydet diyalogları (Grep `getSaveFileName`), `ui/theme`.
+**Bitti ölçütü:** `check_workspace.py` — klasör oluşturma/ayar kalıcılığı, taşıma, kurtarma taslağı yazma/okuma/silme; pencere açılır, değişiklik ayara yansır (geçici `QSettings`).
+
+## I2 — Daha "nazik" sansür görünümü (+ gerçek silme güvencesi)
+**Mevcut durum:** `models.RedactionAnnotation`: düz dolgu + kırmızı kesikli 1,5 px kenar (`create_item`). Dışa aktarırken `pdf_engine._annotated_copy` → `add_redact_annot` + `apply_redactions` ile alttaki **metin/resim PDF'ten kalıcı silinir** (yalnız kaydet/dışa aktarmada; özgün dosya siz kaydedene kadar değişmez, çalışırken geri alınabilir). Metin düzenle ("quiet") ve KVKK da aynı sınıfı kullanır.
+**Yapılacak**
+- Düzenleme sırasında yumuşak görünüm: hafif saydam dolgu (alpha ~%55) + ince, açık kenar (kesikli kırmızı yerine tema vurgusu), yuvarlatılmış köşe (yalnız ekranda); "Nihai görünüm" anahtarı (dolgu %100, kenarsız) — çıktı değişmez (dikdörtgen, tam dolgu).
+- Özellik çubuğunda: dolgu rengi (siyah / koyu gri / beyaz / özel), isteğe bağlı **etiket metni** ("GİZLİ", "[KARARTILDI]"; PyMuPDF `add_redact_annot(text=…, fill=…)`), KVKK'da aynı seçenekler.
+- Araç ipucu/ilk kullanım metni: "Kaydedince altındaki metin ve resim PDF'ten KALICI silinir."
+**Yeniden kullan:** `models.py` (RedactionAnnotation, `to_dict/_from_dict` — yeni alanlar geriye uyumlu: eski projeler açılmalı), `mw_annot.py`/özellik çubuğu (Grep `redact`), `ui/kvkk.py`, `pdf_engine._annotated_copy`.
+**Bitti ölçütü:** `check_redaction.py` — dışa aktarılan PDF'te sansürlenen metin `get_text()`'te YOK ve görüntüde dolgu rengi var; etiketli sansür; eski JSON proje yüklenir; nihai-görünüm anahtarı sahne öğesini değiştirir.
+
+## I3 — Tarama sonrası müdahale + düzleştirme (eğim/gölge/PDF)
+**Mevcut durum:** `scan.py`: perspektif düzeltme (`warp`), `rotate(derece)`, filtreler (`belge` filtresindeki `_flatten` gölge/aydınlatma düzleştirir); **eğim (deskew) yok**. `ui/scanner.py`: köşe sürükleme, filtre, parlaklık/kontrast, döndür, sayfa şeridi. PDF "düzleştirme" (işaret/form gömme) seçeneği yok.
+**Yapılacak**
+- `scan.deskew(img, max_derece=15)` → (görüntü, bulunan açı) (metin satırı eğimi: eşik → `minAreaRect`/Hough, güvenilmezse 0); `ScanDialog`'a "Otomatik eğim düzelt" + **eğim açısı kaydırıcısı** (±15°, elle); "Gölge düzleştir" her filtrede açılıp kapanır; **sayfa başına** geri alma ("Bu sayfayı sıfırla").
+- İsteğe bağlı: "Temizle" fırçası (beyaz boyama; leke/parmak) — yalnız taramada, kalıcı değil önizlemeden pişirilir.
+- **PDF düzleştirme:** Belge → "Düzleştir ve kaydet…": işaretleri, yorumları ve form alanlarını sayfa içeriğine gömer (PyMuPDF `Document.bake` varsa onu kullan, yoksa alan/işaret tek tek içeriğe yaz); ek seçenek "Sayfaları resme çevir (metin kopyalanamaz)".
+**Yeniden kullan:** `scan.py`, `ui/scanner.py`, `ui/convert.BackgroundJob`, `pdf_engine.export_pdf/_annotated_copy`, `forms.py`.
+**Bitti ölçütü:** `check_scan.py`'ye deskew (sentetik 5° eğik metin → ≤0,5° kalır, eğimsizde dokunmaz) ve `check_flatten.py` (düzleştirilmiş PDF'te işaret/alan nesnesi yok ama görünüm var, resme çevirmede metin yok).
+
+## I4 — Paylaşım seçenekleri (yerel ağ dışında)
+**Mevcut durum:** QR aktarımı yalnızca **aynı yerel ağda** çalışır (`qrshare.py`, `ui/share.py`).
+**Yapılacak**
+- QR penceresine "Aynı ağda değil misiniz?" yardımı: telefonun **mobil sıcak noktasına** bilgisayarı bağlamak (internet gerekmez, QR aynı çalışır); ağ adresi seçimi zaten var.
+- **Paylaş** menüsü (Dosya): e-postayla gönder (varsayılan posta istemcisi; Outlook varsa eklentili, yoksa dosyayı seçili klasörde aç + boş e-posta), **bulut klasörüne kaydet** (OneDrive / Google Drive / Dropbox yerel klasörünü algıla; senkronu o uygulama yapar), dosya konumunu aç.
+- Deneysel/isteğe bağlı: internet üzerinden QR için **kullanıcının kendi kurduğu tünel** (cloudflared/ngrok) adresini girme alanı; bu durumda sunucu **6 haneli PIN** ister (5 yanlış denemede kilit). Uygulama üçüncü taraf bir servisle kendisi konuşmaz; uyarı metni: dosyalar o servisten geçer.
+**Yeniden kullan:** `qrshare.ShareServer` (PIN için `token` yanında `pin` ekle), `ui/share.py`, `workspace.py` (I1), `os.startfile`/`QDesktopServices`.
+**Bitti ölçütü:** `check_qrshare_*`'a PIN kontrolleri (yanlış PIN reddi, kilit, doğru PIN geçer); bulut klasörü algılama (sahte ortam değişkeni/klasör), e-posta/konum açma çağrıları (sahte `QDesktopServices`).
+
+## I5 — Kullanılabilirlik denetimi ve iyileştirme (iki adım, ayrı sohbetler)
+**Not:** "Arayüz kullanışlı mı?" sorusuna denemeden dürüst cevap verilemez; bu aşama ölçer, sonra düzeltir.
+**I5a (yalnız denetim, kod yok):** pencereyi temiz ayarlarla açıp 8 temel durumun **tek seferde** ekran görüntüsünü al (boş açılış, PDF açık, araç seçili, sansür, karşılaştırma, tarama, Tercihler, Belge menüsü); sezgisel değerlendirme (görünürlük, tutarlılık, hata önleme, kısayollar, boş durumlar), menü yoğunluğu sayımı (Belge menüsü 20+ eylem), kısayol çakışmaları, Türkçe/ikon tutarlılığı, geri alınamayan işlemler (a11y düzeltmeleri, sansür). Çıktı: `UX_RAPOR.md` — kritik/orta/düşük öncelikli, her madde için tahmini efor. Ayrıca 10 görevlik **kullanıcı deneme listesi** (ör. "bir PDF'i aç, bir paragrafı sansürle, kaydet") — kullanıcı kendisi dener, takıldığı yerleri yazar.
+**I5b (uygulama):** kullanıcının onayladığı en yüksek 5–8 madde (olası örnekler: alt menülere gruplama, boş durum ipuçları/ilk kullanım turu, araç ipuçlarında kısayol, durum çubuğu geri bildirimi, geri alınabilir düzeltmeler, klavye erişimi, yüksek DPI/kontrast).
+**Bitti ölçütü:** I5a: rapor + deneme listesi commit'li; I5b: seçilen maddeler + ilgili check betikleri + tam pytest; tek ekran görüntüsü (sonda).
+
+## K1 — Sürüm 1.0.0, PyInstaller derlemesi, kendi kendini sınama
+**Başlangıç:** bu aşamada yayın sürümü **1.0.0** olur.
+**Yapılacak**
+- `appinfo.py`: `APP_NAME="PDF Annotator"`, `VERSION="1.0.0"`, `PUBLISHER`, `APP_ID` (sabit GUID; kurucu ve güncelleme aynısını kullanır), `UPDATE_URL=""` (K3). Hakkında penceresi, pencere başlığı ve exe sürüm bilgisi buradan okunur (tek kaynak).
+- `pdfannotator.spec` (**onedir**; onefile yavaş açılır): `datas`: `tessdata/` (tur+eng), `fonts/`, `ui` varlıkları; `hiddenimports`: pdf2docx, pyhanko, segno, openpyxl, cv2, pymupdf; gereksizleri hariç tut (tkinter, matplotlib, test paketleri); simge (`app.ico`; yoksa SVG'den üret); çıktı `dist\PDF Annotator\`. `build.bat`: temiz `venv` kurar, `pip install -r requirements.txt pyinstaller`, derler.
+- `--selftest` bayrağı: uygulamayı açmadan tüm modülleri içe aktarır, tessdata/fonts/ikonları bulur, küçük PDF'i render eder + OCR + Word/Excel/QR/tarama çekirdeğini bir kez çalıştırır, `selftest.txt` yazar, hata varsa çıkış kodu 1.
+**Bitti ölçütü:** `build.bat` çalışır; `dist` içindeki exe, **Python'un PATH'te olmadığı** ortamda `--selftest` ile geçer; eksik dosya/DLL varsa spec düzeltilir (kaynak dosyalar). Kullanıcı bir PDF açıp OCR/kaydet dener (tek elle deneme).
+
+## K2 — Profesyonel kurucu (setup.exe, Denetim Masası kaydı)
+**Araç:** Inno Setup 6 (ücretsiz; derleyici `ISCC.exe` gerekir — `winget install JRSoftware.InnoSetup`; kurmadan önce kullanıcıya sor).
+**Yapılacak**
+- `kurulum.iss`: `AppId={APP_ID}` (güncellemede aynı uygulama olarak üzerine kurulsun), `AppName/AppVersion/AppPublisher/AppPublisherURL`, `DefaultDirName={autopf}\PDF Annotator`, `PrivilegesRequiredOverridesAllowed=dialog` (kullanıcı başına ya da tüm kullanıcılar), `UninstallDisplayIcon`/`UninstallDisplayName` → **Ayarlar/Denetim Masası "Program Ekle/Kaldır" listesinde görünür ve oradan kaldırılır** (Inno bunu otomatik yazar), Başlat menüsü + isteğe bağlı masaüstü kısayolu, isteğe bağlı ".pdf dosyalarını PDF Annotator ile aç" ilişkilendirmesi, `CloseApplications=yes`, Türkçe + İngilizce sihirbaz dili, lisans/README sayfası, kaldırırken "Ayarlar ve çalışma klasörü silinsin mi?" (varsayılan: hayır; kullanıcının belgelerine dokunma).
+- Çalışma zamanı: PyInstaller çıktısı VC++ çalışma zamanı DLL'lerini içerir; yine de yoksa `vc_redist.x64.exe`'yi (sessiz) kuran isteğe bağlı bölüm.
+- `build.bat` sonunda `ISCC kurulum.iss` → `dist\PDF-Annotator-Setup-1.0.0.exe`; SHA-256 yazdır.
+- **İmza notu:** imzasız kurucuda Windows SmartScreen "bilinmeyen yayıncı" uyarısı verir (profesyonellik için kod imzalama sertifikası gerekir; ayrı karar). README'ye "Daha fazla bilgi → Yine de çalıştır" açıklaması ekle.
+**Temiz makine doğrulaması:** Windows 11 **Home**'da Windows Sandbox yoktur. Sırayla: (1) yeni bir yerel kullanıcı hesabında kur-çalıştır-kaldır, (2) mümkünse VirtualBox VM, (3) **kullanıcı başka bir bilgisayarda kontrol listesiyle dener** (kurulum, başlat menüsü, PDF aç, OCR, Word dönüştürme, QR, kaldırma → Program Ekle/Kaldır'dan gittiğini doğrula). Liste `README`'de.
+**Bitti ölçütü:** setup.exe üretilir; kurucu sessiz modda (`/VERYSILENT`) temiz bir kullanıcı profilinde kurulur, `--selftest` geçer, kayıt defterinde Uninstall girdisi vardır, kaldırınca klasör ve girdi gider (otomatik script; kullanıcı verisi korunur).
+
+## K3 — Otomatik güncelleme (yayınladığınızda)
+**Önkoşul:** K1 (`appinfo.py`) ve K2 (kurucu). Güncelleme adresi ayarlanana kadar özellik "adres tanımlı değil" diyerek kapalı kalır.
+**Yapılacak**
+- `updater.py` (arayüzsüz): `check(url)` → `latest.json` (`{"version","url","sha256","notes","size"}`; GitHub Releases `releases/latest` yanıtını da ayrıştır), sürüm karşılaştırma (kendi `1.2.10 > 1.2.9` mantığı, ek paket yok), `download(info, progress, cancelled)` (geçici dosya + ilerleme), **SHA-256 doğrulaması zorunlu** (uyuşmazsa sil ve reddet), yalnızca **HTTPS**, `install(path)` → `setup.exe /SILENT /CLOSEAPPLICATIONS /RESTARTAPPLICATIONS` başlatıp uygulamayı kapatır.
+- Arayüz: Tercihler → **Güncelleme** bölümü ("Şimdi denetle", "Açılışta denetle" varsayılan açık, "Sürüm notları"), Yardım → Güncellemeleri denetle, yeni sürüm varsa toast + "İndir ve kur" diyaloğu (notlar, boyut). Ağ hatası sessiz (uygulama kullanımı engellenmez).
+- `tools/make_release.py`: sürümü `appinfo.py`'den okur, kurucunun SHA-256'sını ve `latest.json`'u üretir; `YAYIN.md`: yayın adımları (sürüm artır → `build.bat` → `make_release.py` → GitHub Release'e kurucu + `latest.json` yükle).
+- Kullanıcıdan alınacak: yayın yeri (GitHub deposu mu, kendi sitesi mi) ve adres → `appinfo.UPDATE_URL`.
+**Bitti ölçütü:** `check_updater.py` — yerel sahte HTTP sunucusuyla: yeni sürüm bulunur, eski/aynı sürümde "güncel", bozuk SHA-256 reddedilir, HTTP (https değil) reddedilir, indirme iptali; kurulum çağrısı sahte (komut satırı doğrulanır).
