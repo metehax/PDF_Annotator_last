@@ -61,7 +61,9 @@ import docsec
 from headfoot import HeadFootConfig
 from ui.docdialogs import CompressDialog, DocInfoDialog, PasswordDialog, SecurityCheckDialog
 from ui.comments import CommentsPanel, ask_note_text
+from ui.a11y import A11yDialog
 from ui.compare import CompareDiffPanel
+from ui.convert import ConvertDialog
 import textdiff
 import forms
 from ui.formui import FormFieldDialog, FormFieldEditor, FormsPanel
@@ -918,6 +920,9 @@ class MainWindow(QMainWindow):
         A(m_doc, "info", "Belge bilgileri…", self.open_doc_info, "Ctrl+D")
         A(m_doc, "lock", "Parola koruması…", self.open_password)
         A(m_doc, "shield", "Güvenlik denetimi…", self.open_security_check)
+        A(m_doc, "eye", "Erişilebilirlik denetimi…", self.open_a11y)
+        A(m_doc, "download", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
+        A(m_doc, "calc", "Excel'e dönüştür (tablolar, .xlsx)…", lambda: self.open_convert("xlsx"))
         A(m_doc, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
         A(m_doc, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
         m_doc.addSeparator()
@@ -3747,6 +3752,33 @@ class MainWindow(QMainWindow):
             self.toasts.show("Seçilen içerik temizlendi. Kaydettiğinizde PDF'e yansır.", "success")
 
         SecurityCheckDialog(self, s, cleaned).exec()
+
+    # -- Word / Excel dönüştürme ve erişilebilirlik ---------------------------
+    def open_convert(self, fmt: str = "docx"):
+        s = self.active_session
+        if not s:
+            self.toasts.show("Önce bir belge açın.", "info")
+            return None
+        dlg = self._convert_dialog = ConvertDialog(self, s, fmt)
+        dlg.exec()
+        return dlg
+
+    def open_a11y(self):
+        s = self.active_session
+        if not s:
+            self.toasts.show("Önce bir belge açın.", "info")
+            return None
+
+        def changed():
+            s.pdf._invalidate()                  # OCR sayfaları değiştirmiş olabilir
+            self._mark_dirty(s)
+            self._build_thumbnails()
+            self._build_toc()                    # yer imleri eklenmiş olabilir
+            self.goto_page(s.current_page)
+
+        dlg = self._a11y_dialog = A11yDialog(self, s, changed)
+        dlg.exec()
+        return dlg
 
     # -- KVKK ----------------------------------------------------------------
     def open_kvkk(self):

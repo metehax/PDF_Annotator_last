@@ -53,6 +53,10 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/workflow.py` | İş akışı penceresi: adım paleti, sürükleyerek sıralanan zincir, ayar paneli, şablon, hedef seçimi, ilerleme/durdurma, sonuç tablosu |
 | `textdiff.py`   | **Metin farkı çekirdeği:** iki belgenin metnini satır + kelime düzeyinde karşılaştırır (eklenen / silinen / değişen, sayfa konumlarıyla) |
 | `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
+| `convert.py`    | **PDF → Word** (pdf2docx) ve **PDF → Excel** (PyMuPDF `find_tables` + openpyxl) çekirdeği |
+| `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
+| `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
+| `ui/a11y.py`    | Erişilebilirlik raporu penceresi: kontrol listesi, tek tıkla düzeltme, rapor kaydı |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
@@ -322,3 +326,33 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   Sol/sağ belge ya da "Büyük/küçük harfi yoksay" değişince otomatik yeniden hesaplanır.
 * **Sınırlar:** yalnızca metin katmanı karşılaştırılır; taranmış (metinsiz) belge için önce OCR gerekir (panel uyarır).
   Görsel/çizim farkı ve henüz kaydedilmemiş işaretler karşılaştırmaya girmez.
+
+## Yeni: Word / Excel'e dönüştürme
+
+**Belge → Word'e dönüştür (.docx)** ve **Excel'e dönüştür (tablolar, .xlsx)**. Dönüştürme belgenin işaretli kopyasından,
+arka planda yapılır; kapsam tüm belge ya da yalnız geçerli sayfadır. Çıktı geçici dosyaya yazılıp yerine konur (yarım dosya kalmaz).
+
+* **Word:** `pdf2docx` ile metin, tablo, görsel ve yazı biçimi korunmaya çalışılır. Karmaşık düzenlerde küçük kaymalar olabilir.
+  Metinsiz (taranmış) sayfalar resim olarak kalır; pencere bunu uyarır, önce OCR çalıştırın.
+* **Excel:** sayfalardaki tablolar algılanır (çizgili tablolar en iyi sonucu verir); her tablo ayrı sayfaya (`S3-T1`) yazılır,
+  ilk satır kalın başlıktır. Sayılar hücrede **sayı** olur (`1.250,50` → 1250,5); ondalık biçimi seçilir. Baştaki sıfırlı kodlar
+  (`007`) ve 15 haneden uzun sayılar metin kalır. Tablo bulunamazsa dosya yazılmaz, nedeni söylenir.
+
+## Yeni: Erişilebilirlik denetimi
+
+**Belge → Erişilebilirlik denetimi…** sekiz kontrolü çalıştırır (✓ geçti · ⚠ uyarı · ✕ sorun · ℹ bilgi):
+
+| Kontrol | Ne bakar | Düzeltme |
+|---|---|---|
+| Etiketli PDF | Yapı ağacı + "etiketli" işareti | Yok (kaynak uygulamadan etiketli dışa aktarın) |
+| Belge dili | `/Lang` | **Tek tık** (metinden önerilir: tr-TR, en-US…) |
+| Belge başlığı | Başlık dolu mu, dosya adına benziyor mu, pencere başlığında gösteriliyor mu | **Tek tık** (ilk sayfadaki en büyük satır önerilir) |
+| Başlık yapısı | Etiket ağacında H/H1–H6 ya da yer imleri | **Tek tık:** görsel başlıklardan yer imi üretir |
+| Alternatif metin | Etiket ağacındaki `Figure` öğelerinde `Alt`; etiketsiz belgede görsel sayısı | Yok (alt metin içerik bilgisi ister) |
+| Okuma sırası | Etiketliyse bilgi; etiketsizde içerik akışı görsel sıraya uyuyor mu (sezgisel) | Yok |
+| Gömülü yazı tipleri | Gömülü olmayan yazı tipleri | Yok |
+| Taranmış sayfalar | Yalnızca resimden oluşan sayfalar | **Tek tık:** OCR (arka planda, sayfa metinli sürümüyle değişir) |
+
+Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlenebilir. Düzeltmeler açık belgeye uygulanır
+(Ctrl+Z ile geri alınmaz) ve kaydedince PDF'e yansır. OCR, taranmış sayfanın görüntüsünü yeniden kodlar ve o sayfadaki
+özgün bağlantı/form alanlarını taşımaz. **Raporu kaydet…** HTML ya da TXT yazar. Denetim belgenin kopyasında çalışır, arayüz donmaz.
