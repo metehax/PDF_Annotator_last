@@ -61,7 +61,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/imgpdf.py`  | **Görselleri PDF'e çevir** penceresi: sürükle-bırak, sıralama, sayfa boyutu/yön/kenar boşluğu/kalite, tek ya da ayrı PDF |
 | `workspace.py`  | **Çalışma klasörü + otomatik kurtarma çekirdeği:** kök/alt klasörler (Gelen, Taramalar, Donusturulenler, Projeler, Yedekler, IsAkisi), çıktı tercihleri, son klasör, eski gelen klasörü taşıma, kurtarma taslakları |
 | `ui/preferences.py` | **Tercihler** penceresi (Düzenle → Tercihler…, Ctrl+,) |
-| `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno) |
+| `sharing.py`    | **Paylaşım yardımcıları:** yerel bulut klasörü algılama (OneDrive/Google Drive/Dropbox), e-posta (Outlook ekli ya da klasör + mailto), konumu aç |
+| `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno), isteğe bağlı 6 haneli PIN + kilit |
 | `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
 | `ui/a11y.py`    | Erişilebilirlik raporu penceresi: kontrol listesi, tek tıkla düzeltme, rapor kaydı |
@@ -433,3 +434,14 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   görünüm aynı; metin kalır). **Sayfaları resme çevir** seçeneği (150/200/300 dpi, JPEG kalitesi) metni de kaldırır: kopyalanamaz/aranamaz.
   Açık belge değişmez, sonuç `*_duzlestirilmis.pdf` olarak kaydedilip yeni sekmede açılır; iş arka planda çalışır, durdurulabilir.
   Sansür kutuları önce gerçekten uygulanır (altındaki metin silinir), sonra gömülür.
+
+## Yeni: Paylaşım seçenekleri (yerel ağ dışında)
+* **Aynı ağda değil misiniz?** (QR penceresi): telefonun **mobil sıcak noktasına** bilgisayarı bağlayın (internet gerekmez), *Ağ adresi*
+  listesinden yeni adresi seçip QR'ı yeniden okutun; **Wi‑Fi ayarlarını aç** düğmesi vardır. Aktarım yine doğrudan telefon ile bilgisayar arasındadır.
+* **Dosya → Paylaş:** **E-postayla gönder** (Outlook varsa dosya ekli yeni ileti; yoksa dosyanın klasörü açılır + boş e-posta, dosyayı sürükleyin),
+  **Bulut klasörüne kaydet** (bilgisayarınızda bulunan OneDrive / Google Drive / Dropbox klasörlerinden birine kopya; eşitlemeyi o uygulama yapar),
+  **Dosya konumunu aç**. Kaydedilmemiş değişiklik varsa özgün dosya yerine işaretli kopya kullanılır.
+* **Deneysel — kendi internet tünelim:** QR penceresinde *Gelişmiş* kutusu. cloudflared/ngrok gibi **kendi kurduğunuz** tünelin adresini girin, tüneli gösterilen
+  yerel bağlantı noktasına yönlendirin. Sunucu yalnız `127.0.0.1`'de dinler ve **6 haneli PIN** ister (telefon önce PIN sayfasını görür); **5 yanlış denemede kilitlenir**
+  (doğru PIN de kabul edilmez; *Kilidi aç* ya da *Yeni PIN*). Uygulama tünel servisiyle **kendisi bağlanmaz**; yalnızca adresi QR'a yazar. Dosyalar o servisten geçer.
+  Güvenlik kuralları aynıdır (anahtarlı adres, yalnız PDF/resim, boyut/adet sınırı).

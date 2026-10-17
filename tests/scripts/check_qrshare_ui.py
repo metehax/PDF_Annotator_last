@@ -152,6 +152,106 @@ check("kuyruk boşaldı, düğme pasif", dlg._scan_queue == [] and not dlg.btn_s
 sd.close()
 dlg.chk_scan.setChecked(False)
 
+# ================= I4: aynı ağda değil misiniz? + tünel/PIN =================
+import http.client
+from PySide6.QtGui import QDesktopServices
+from PySide6.QtWidgets import QApplication as _QA
+
+opened = []
+_orig_open = QDesktopServices.openUrl
+QDesktopServices.openUrl = staticmethod(lambda u: (opened.append(u.toString()), True)[1])
+dlg.chk_open.setChecked(False)
+check("yardım kutusu başta gizli", dlg.help_box.isHidden() and not dlg.btn_help.isChecked())
+dlg.btn_help.setChecked(True)
+check("yardım: mobil sıcak nokta adımları, internet gerekmez", not dlg.help_box.isHidden() and "sıcak nokta" in dlg.help_lbl.text().lower()
+      and "internet gerekmez" in dlg.help_lbl.text())
+dlg.btn_wifi.click()
+check("Wi-Fi ayarlarını aç düğmesi ms-settings adresini açar", opened and opened[-1] == "ms-settings:network-wifi", str(opened))
+dlg.btn_help.setChecked(False)
+check("yardım tekrar gizlenir", dlg.help_box.isHidden())
+
+check("tünel kutusu başta kapalı/gizli, PIN yok", not dlg.chk_tunnel.isChecked() and dlg.tunnel_box.isHidden() and not dlg.server.pin_required)
+lookups = []
+_orig_gai = socket.getaddrinfo
+socket.getaddrinfo = lambda host, *a, **k: (lookups.append(host), _orig_gai(host, *a, **k))[1]
+dlg.chk_tunnel.setChecked(True)
+pump(ms=200)
+sv = dlg.server
+check("tünel kipi: sunucu yalnız 127.0.0.1'de, PIN'li", sv.host == "127.0.0.1" and sv.pin_required)
+check("tünel kipi: PIN etiketi 6 hane, ağ listesi pasif", dlg.pin_lbl.text() == sv.pin and len(sv.pin) == 6 and sv.pin.isdigit() and not dlg.ip_combo.isEnabled())
+check("tünel kipi: uyarı metni (dosyalar servisten geçer, uygulama kendisi bağlanmaz)", "servisten geçer" in dlg.tunnel_warn.text()
+      and "kendisi bağlanmaz" in dlg.tunnel_warn.text() and "5 yanlış" in dlg.tunnel_warn.text())
+check("adres girilmeden QR yok, yönerge var", dlg.share_url() == "" and dlg.url_lbl.text() == "Tünel adresini girin"
+      and (dlg.qr.pixmap() is None or dlg.qr.pixmap().isNull()))
+check("yerel bağlantı noktası gösterilir", str(sv.port) in dlg.port_lbl.text())
+port = sv.port
+check("adres geçerli: QR + bağlantı tünel adresi + anahtar", dlg.set_tunnel_address("https://ornek.trycloudflare.com/") is True
+      and dlg.share_url() == f"https://ornek.trycloudflare.com/{sv.token}/" and dlg.url_lbl.text() == dlg.share_url()
+      and dlg.qr.pixmap() is not None and not dlg.qr.pixmap().isNull())
+for bad in ("ornek", "ftp://x.com", "https://a b.com", "javascript:alert(1)", "", "https://x.com/?q=1", "https://"):
+    before = dlg.share_url()
+    check(f"geçersiz tünel adresi reddedilir: {bad!r}", dlg.set_tunnel_address(bad) is False and dlg.share_url() == before)
+check("tünel adresi ayarda saklanır", str(w.settings.value("share/tunnelUrl")) == "https://ornek.trycloudflare.com")
+_QA.clipboard().clear()
+dlg._copy_url()
+check("kopyala: tünel bağlantısı panoda", _QA.clipboard().text() == dlg.share_url())
+check("uygulama tünel adresine kendisi bağlanmadı (DNS çözümlemesi yok)", not any("trycloudflare" in str(h) for h in lookups), str(lookups))
+socket.getaddrinfo = _orig_gai
+
+
+def hreq(method, path, body=None, headers=None):
+    c = http.client.HTTPConnection("127.0.0.1", sv.port, timeout=10)
+    c.request(method, path, body=body, headers=headers or {})
+    r = c.getresponse()
+    out = (r.status, r.read(), dict(r.getheaders()))
+    c.close()
+    return out
+
+
+tk = sv.token
+st, body, _ = hreq("GET", f"/{tk}/")
+check("telefon önce PIN sayfasını görür", st == 200 and b"PIN gerekli" in body and b"Kamerayla" not in body)
+check("PIN'siz yükleme reddedilir, dosya yazılmaz", hreq("POST", f"/{tk}/up", photo, {"X-Filename": "izinsiz.jpg"})[0] == 401
+      and not os.path.exists(os.path.join(recv, "izinsiz.jpg")))
+for k in range(5):
+    st, body, _ = hreq("POST", f"/{tk}/auth", b"000000" if sv.pin != "000000" else b"111111")
+pump(ms=100)
+dlg.refresh_pin_state()
+check("5 yanlış PIN: sunucu kilitlendi (423), kilidi aç düğmesi görünür", st == 423 and sv.locked and not dlg.btn_unlock.isHidden()
+      and "kilitlendi" in dlg.pin_state.text())
+check("kilitliyken doğru PIN de geçmez", hreq("POST", f"/{tk}/auth", sv.pin.encode())[0] == 423)
+dlg.btn_unlock.click()
+check("Kilidi aç: kilit kalkar, düğme gizlenir", not sv.locked and dlg.btn_unlock.isHidden())
+st, body, hd = hreq("POST", f"/{tk}/auth", sv.pin.encode())
+ck = {"Cookie": hd.get("Set-Cookie", "").split(";")[0]}
+check("doğru PIN: oturum çerezi", st == 200 and "pdfsid=" in ck["Cookie"])
+n_log = dlg.log.count()
+st, body, _ = hreq("POST", f"/{tk}/up", photo, {"X-Filename": "pinli.jpg", **ck})
+check("PIN'li oturumda yükleme çalışır, dosya gelenlerde", st == 200 and pump(until=lambda: dlg.log.count() == n_log + 1)
+      and os.path.exists(os.path.join(recv, "pinli.jpg")))
+old_pin = sv.pin
+dlg.btn_newpin.click()
+check("Yeni PIN: PIN değişir, eski oturum geçersiz", dlg.pin_lbl.text() == sv.pin and sv.pin != old_pin)
+check("Yeni PIN: eski çerez reddedilir", hreq("GET", f"/{tk}/list", headers=ck)[0] == 401)
+dlg.chk_tunnel.setChecked(False)
+pump(ms=200)
+sv2 = dlg.server
+check("tünel kapanınca PIN kalkar, yerel ağ kipi geri gelir", not sv2.pin_required and sv2.host == "127.0.0.1" and dlg.ip_combo.isEnabled()
+      and dlg.tunnel_box.isHidden() and dlg._pin is None)
+c = http.client.HTTPConnection("127.0.0.1", sv2.port, timeout=10)
+c.request("GET", f"/{sv2.token}/")
+r2 = c.getresponse()
+b2 = r2.read()
+c.close()
+check("PIN'siz kipte sayfa doğrudan açılır (geriye uyumlu)", r2.status == 200 and b"Kamerayla" in b2 and b"PIN gerekli" not in b2)
+check("QR adresi yerel adrese döndü", dlg.share_url() == sv2.url and dlg.url_lbl.text() == sv2.url)
+dlg.chk_tunnel.setChecked(True)
+pump(ms=200)
+check("tünel yeniden açılınca kayıtlı adres gelir, yeni PIN üretilir", dlg.tunnel_edit.text() == "https://ornek.trycloudflare.com"
+      and dlg.server.pin_required)
+dlg.chk_tunnel.setChecked(False)
+QDesktopServices.openUrl = _orig_open
+
 # görüntü: sonda tek kez
 shot = os.path.join(SP, "f_share.png")
 dlg.grab().save(shot)

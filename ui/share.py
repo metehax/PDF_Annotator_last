@@ -14,12 +14,13 @@ import shutil
 import tempfile
 import time
 from typing import List, Optional
+from urllib.parse import urlparse
 
 from PySide6.QtCore import QStandardPaths, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap
 from PySide6.QtWidgets import (
     QApplication, QCheckBox, QComboBox, QDialog, QFileDialog, QHBoxLayout, QLabel, QListWidget,
-    QMessageBox, QPushButton, QVBoxLayout,
+    QLineEdit, QMessageBox, QPushButton, QVBoxLayout, QWidget,
 )
 
 import qrshare
@@ -28,6 +29,17 @@ from pdf_engine import IMAGE_EXTS
 from ui.icons import icon
 
 IDLE_LIMIT_S = 15 * 60
+WIFI_SETTINGS_URL = "ms-settings:network-wifi"
+HOTSPOT_HELP = (
+    "<b>Aynı ağda değil misiniz? Mobil sıcak nokta kullanın (internet gerekmez):</b><br>"
+    "1. Telefonda <i>Mobil sıcak nokta / Kişisel erişim noktası</i>nı açın.<br>"
+    "2. Bu bilgisayarı telefonun Wi‑Fi ağına bağlayın.<br>"
+    "3. Yukarıdaki <i>Ağ adresi</i> listesinden yeni adresi seçin; QR'ı telefonla yeniden okutun.<br>"
+    "Aktarım doğrudan telefon ile bilgisayar arasında kalır, hiçbir dış servis kullanılmaz.")
+TUNNEL_WARN = (
+    "<b>Deneysel:</b> Kendi kurduğunuz bir tünel (cloudflared, ngrok vb.) adresini girin; tüneli bu bilgisayarda "
+    "<i>yerel bağlantı noktası</i>na yönlendirin. Uygulama üçüncü taraf bir servisle <u>kendisi bağlanmaz</u>; ancak "
+    "dosyalar o servisten geçer. Bu kipte telefon önce 6 haneli PIN'i girmelidir; 5 yanlış denemede kilitlenir.")
 QR_PX = 240
 
 
@@ -84,6 +96,74 @@ class ShareDialog(QDialog):
         row.addWidget(self.ip_combo, 1)
         row.addWidget(self.btn_copy)
         v.addLayout(row)
+
+        # -- aynı ağda değil misiniz? ----------------------------------------------
+        self.btn_help = QPushButton("Aynı ağda değil misiniz?")
+        self.btn_help.setObjectName("secondary")
+        self.btn_help.setCheckable(True)
+        self.btn_help.toggled.connect(lambda on: self.help_box.setVisible(on))
+        v.addWidget(self.btn_help)
+        self.help_box = QWidget()
+        hb = QVBoxLayout(self.help_box)
+        hb.setContentsMargins(0, 0, 0, 0)
+        self.help_lbl = QLabel(HOTSPOT_HELP)
+        self.help_lbl.setObjectName("hint")
+        self.help_lbl.setWordWrap(True)
+        hb.addWidget(self.help_lbl)
+        self.btn_wifi = QPushButton("Wi‑Fi ayarlarını aç")
+        self.btn_wifi.setObjectName("secondary")
+        self.btn_wifi.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(WIFI_SETTINGS_URL)))
+        hb.addWidget(self.btn_wifi)
+        self.help_box.hide()
+        v.addWidget(self.help_box)
+
+        # -- gelişmiş: kendi internet tüneli + PIN ----------------------------------
+        self.chk_tunnel = QCheckBox("Gelişmiş: kendi internet tünelimi kullanacağım (PIN'li)")
+        self.chk_tunnel.toggled.connect(lambda on: self.set_tunnel(on))
+        v.addWidget(self.chk_tunnel)
+        self.tunnel_box = QWidget()
+        tb = QVBoxLayout(self.tunnel_box)
+        tb.setContentsMargins(0, 0, 0, 0)
+        tb.setSpacing(6)
+        self.tunnel_warn = QLabel(TUNNEL_WARN)
+        self.tunnel_warn.setObjectName("hintWarn")
+        self.tunnel_warn.setWordWrap(True)
+        tb.addWidget(self.tunnel_warn)
+        self.port_lbl = QLabel("")
+        self.port_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        tb.addWidget(self.port_lbl)
+        trow = QHBoxLayout()
+        trow.addWidget(QLabel("Tünel adresi:"))
+        self.tunnel_edit = QLineEdit()
+        self.tunnel_edit.setPlaceholderText("https://ornek.trycloudflare.com")
+        self.tunnel_edit.editingFinished.connect(lambda: self.set_tunnel_address(self.tunnel_edit.text()))
+        trow.addWidget(self.tunnel_edit, 1)
+        tb.addLayout(trow)
+        prow = QHBoxLayout()
+        prow.addWidget(QLabel("PIN:"))
+        self.pin_lbl = QLabel("")
+        self.pin_lbl.setStyleSheet("font-size:24px; font-weight:700; letter-spacing:5px;")
+        self.pin_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
+        prow.addWidget(self.pin_lbl)
+        prow.addStretch(1)
+        self.btn_newpin = QPushButton("Yeni PIN")
+        self.btn_newpin.setObjectName("secondary")
+        self.btn_newpin.clicked.connect(self.new_pin)
+        self.btn_unlock = QPushButton("Kilidi aç")
+        self.btn_unlock.setObjectName("secondary")
+        self.btn_unlock.clicked.connect(self.unlock)
+        prow.addWidget(self.btn_newpin)
+        prow.addWidget(self.btn_unlock)
+        tb.addLayout(prow)
+        self.pin_state = QLabel("")
+        self.pin_state.setObjectName("hint")
+        self.pin_state.setWordWrap(True)
+        tb.addWidget(self.pin_state)
+        self.tunnel_box.hide()
+        v.addWidget(self.tunnel_box)
+        self._tunnel_on = False
+        self._public_base = ""
+        self._pin: Optional[str] = None
 
         v.addWidget(QLabel("<b>Telefondan gelenler</b>"))
         self.log = QListWidget()
@@ -174,7 +254,8 @@ class ShareDialog(QDialog):
         if old:
             old.stop()
         try:
-            self._server = qrshare.ShareServer(self._receive_dir, on_received=self.received.emit, host=host).start()
+            self._server = qrshare.ShareServer(self._receive_dir, on_received=self.received.emit, host=host,
+                                               pin=self._pin).start()
         except OSError as ex:
             self._server = None
             QMessageBox.critical(self, "Sunucu açılamadı", f"{host} adresinde dinlenemedi:\n{ex}")
@@ -184,17 +265,103 @@ class ShareDialog(QDialog):
         if offers and old and self._tmp:                       # adres değişince sunulanları yeni sunucuya taşı
             for it in old._offers:
                 self._server.offer(it["path"], it["name"])
-        url = self._server.url
+        self._show_url()
+        self._idle.start()
+
+    def share_url(self) -> str:
+        """Telefona verilecek adres: tünel kipinde tünel adresi + anahtar (adres girilmediyse boş), değilse yerel adres."""
+        if self._server is None:
+            return ""
+        if self._tunnel_on:
+            return f"{self._public_base}/{self._server.token}/" if self._public_base else ""
+        return self._server.url
+
+    def _show_url(self):
+        url = self.share_url()
+        if self._tunnel_on:
+            self.port_lbl.setText(f"Yerel bağlantı noktası (tüneli buraya yönlendirin): http://127.0.0.1:{self._server.port}"
+                                  if self._server else "")
+        if not url:
+            self.url_lbl.setText("Tünel adresini girin" if self._tunnel_on else "")
+            self.qr.clear()
+            return
         self.url_lbl.setText(url)
         pm = QPixmap()
         pm.loadFromData(qrshare.qr_png(url, scale=max(QR_PX // 41, 4)))
         self.qr.setPixmap(pm.scaled(QR_PX, QR_PX, Qt.AspectRatioMode.KeepAspectRatio,
                                     Qt.TransformationMode.FastTransformation))
-        self._idle.start()
+
+    # -- internet tüneli + PIN ---------------------------------------------------
+    @staticmethod
+    def normalize_public_url(text: str) -> str:
+        """Geçerli http(s) tünel adresini (sondaki / ve boşluk atılmış) döndürür; geçersizse boş."""
+        t = (text or "").strip()
+        u = urlparse(t)
+        if u.scheme not in ("http", "https") or not u.netloc or any(c.isspace() for c in t) or u.query or u.fragment:
+            return ""
+        return t.rstrip("/")
+
+    def set_tunnel(self, on: bool, address: Optional[str] = None):
+        """Tünel kipini açar/kapatır. Açılınca sunucu yalnız 127.0.0.1'de PIN'li yeniden başlar; kapanınca yerel ağa döner.
+        Uygulama tünel adresine kendisi bağlanmaz: adres yalnızca QR/bağlantı metninde kullanılır."""
+        on = bool(on)
+        self._tunnel_on = on
+        self._pin = qrshare.generate_pin() if on else None
+        for w, state in ((self.chk_tunnel, on),):
+            w.blockSignals(True)
+            w.setChecked(state)
+            w.blockSignals(False)
+        self.tunnel_box.setVisible(on)
+        self.ip_combo.setEnabled(not on)
+        if on:
+            saved = address if address is not None else str(self._main.settings.value("share/tunnelUrl", "") or "")
+            self._public_base = self.normalize_public_url(saved)
+            self.tunnel_edit.setText(self._public_base)
+            self._start("127.0.0.1")
+        else:
+            self._public_base = ""
+            self._start(self.ip_combo.currentText())
+        self.refresh_pin_state()
+        self._sync_buttons()
+
+    def set_tunnel_address(self, text: str) -> bool:
+        base = self.normalize_public_url(text)
+        if not base:
+            self.pin_state.setText("Geçerli bir adres girin (https://…).")
+            return False
+        self._public_base = base
+        self._main.settings.setValue("share/tunnelUrl", base)
+        self._show_url()
+        self.refresh_pin_state()
+        return True
+
+    def refresh_pin_state(self):
+        sv = self._server
+        self.pin_lbl.setText(sv.pin if sv and sv.pin_required else "")
+        locked = bool(sv and sv.locked)
+        self.btn_unlock.setVisible(self._tunnel_on and locked)
+        self.btn_newpin.setEnabled(bool(sv and sv.pin_required))
+        if not self._tunnel_on or sv is None:
+            self.pin_state.setText("")
+        elif locked:
+            self.pin_state.setText("Çok fazla yanlış PIN denendi: kilitlendi. Tanıdığınız birine aitse “Kilidi aç”, değilse “Yeni PIN”.")
+        else:
+            self.pin_state.setText(f"{sv.attempts_left} yanlış deneme hakkı kaldı." if sv.failed_attempts else "PIN'i yalnızca telefondaki kişiye söyleyin.")
+
+    def new_pin(self):
+        if self._server is not None and self._server.pin_required:
+            self._pin = self._server.new_pin()
+            self.refresh_pin_state()
+
+    def unlock(self):
+        if self._server is not None:
+            self._server.unlock()
+            self.refresh_pin_state()
 
     def _copy_url(self):
-        if self._server:
-            QApplication.clipboard().setText(self._server.url)
+        url = self.share_url()
+        if url:
+            QApplication.clipboard().setText(url)
             self._main.toasts.show("Bağlantı panoya kopyalandı", "success")
 
     def _ip_changed(self, _i):
@@ -202,6 +369,8 @@ class ShareDialog(QDialog):
             self._start(self.ip_combo.currentText())
 
     def _check_idle(self):
+        if self._tunnel_on:
+            self.refresh_pin_state()
         if self._server and self._server.idle_seconds() > IDLE_LIMIT_S:
             self._main.toasts.show("Telefon aktarımı boşta kaldığı için durduruldu.", "info")
             self.close()

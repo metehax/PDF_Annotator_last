@@ -117,6 +117,118 @@ check("durum", not srv.running)
 srv.stop()
 check("ikinci stop sorun cikarmaz", True)
 
+
+# ================= PIN (internet tüneli gibi güvenilmeyen yollar için) =================
+pin_srv = qrshare.ShareServer(os.path.join(tmp, "gelen_pin"), pin="123456", max_bytes=300_000).start()
+
+
+def preq(server, method, path, body=None, headers=None):
+    c = http.client.HTTPConnection(server.host, server.port, timeout=10)
+    c.request(method, path, body=body, headers=headers or {})
+    r = c.getresponse()
+    out = (r.status, r.read(), dict(r.getheaders()))
+    c.close()
+    return out
+
+
+for bad in ("12345", "1234567", "abcdef", "12345a", "١٢٣٤٥٦", 123456, ""):
+    try:
+        qrshare.ShareServer("x", pin=bad)
+        raised = False
+    except ValueError:
+        raised = True
+    check(f"geçersiz PIN reddedilir: {bad!r}", raised)
+p1, p2 = qrshare.generate_pin(), qrshare.generate_pin()
+check("generate_pin: 6 haneli rakam", len(p1) == 6 and p1.isdigit() and qrshare.valid_pin(p1) and not qrshare.valid_pin("12345"))
+plain = qrshare.ShareServer(os.path.join(tmp, "gelen_duz")).start()
+check("PIN'siz sunucu eski gibi (pin_required False, kilitlenmez)", plain.pin_required is False and plain.locked is False and plain.pin is None)
+check("PIN'siz sunucuda auth yolu zararsız (200)", preq(plain, "POST", f"/{plain.token}/auth", b"000000")[0] == 200 and plain.failed_attempts == 0)
+check("PIN'siz sunucuda sayfa doğrudan açılır", b"Kamerayla" in preq(plain, "GET", f"/{plain.token}/")[1])
+plain.stop()
+
+ptok = pin_srv.token
+check("PIN'li sunucu: pin_required, URL'de PIN yok", pin_srv.pin_required and "123456" not in pin_srv.url)
+st, body, hd = preq(pin_srv, "GET", f"/{ptok}/")
+check("çerezsiz sayfa = PIN sayfası (dosya arayüzü yok)", st == 200 and b"PIN gerekli" in body and b"Kamerayla" not in body and b'id="pick"' not in body, st)
+check("PIN sayfası güvenlik başlıkları", "default-src" in hd.get("Content-Security-Policy", "") and hd.get("Cache-Control") == "no-store")
+check("PIN sayfasında PIN yazmaz", b"123456" not in body)
+check("çerezsiz liste 401", preq(pin_srv, "GET", f"/{ptok}/list")[0] == 401)
+pin_srv.offer(os.path.join(tmp, "sunulan_pin.pdf"), "sunulan.pdf") if open(os.path.join(tmp, "sunulan_pin.pdf"), "wb").write(data) else None
+check("çerezsiz indirme 401", preq(pin_srv, "GET", f"/{ptok}/d/0")[0] == 401)
+st, body, _ = preq(pin_srv, "POST", f"/{ptok}/up", data, {"X-Filename": "a.pdf"})
+check("çerezsiz yükleme 401, dosya yazılmadı", st == 401 and not os.path.exists(os.path.join(tmp, "gelen_pin", "a.pdf")), (st, body))
+check("yanlış anahtar yine 404 (PIN'den önce)", preq(pin_srv, "GET", "/yanlis/")[0] == 404 and preq(pin_srv, "POST", "/yanlis/auth", b"123456")[0] == 404)
+check("anahtar sonuna / yönlendirmesi PIN'siz de çalışır", preq(pin_srv, "GET", f"/{ptok}")[0] == 301)
+
+st, body, hd = preq(pin_srv, "POST", f"/{ptok}/auth", b"000000")
+j = json.loads(body)
+check("yanlış PIN: 403, kalan hak", st == 403 and j["ok"] is False and j["left"] == 4 and "Set-Cookie" not in hd, (st, body))
+check("yanlış PIN sayacı arttı, kilit yok", pin_srv.failed_attempts == 1 and not pin_srv.locked and pin_srv.attempts_left == 4)
+st, body, _ = preq(pin_srv, "POST", f"/{ptok}/auth", b"12345")
+check("kısa/biçimsiz PIN de yanlış deneme sayılır", st == 403 and pin_srv.failed_attempts == 2)
+check("çok uzun gövde 400 (deneme sayılmaz)", preq(pin_srv, "POST", f"/{ptok}/auth", b"1" * 100)[0] == 400 and pin_srv.failed_attempts == 2)
+st, body, hd = preq(pin_srv, "POST", f"/{ptok}/auth", b"123456")
+ck = hd.get("Set-Cookie", "")
+check("doğru PIN: 200 + oturum çerezi (HttpOnly, SameSite, yol anahtara bağlı)", st == 200 and json.loads(body)["ok"] and "pdfsid=" in ck
+      and "HttpOnly" in ck and "SameSite=Strict" in ck and f"Path=/{ptok}/" in ck, ck)
+check("doğru PIN sayacı sıfırlar", pin_srv.failed_attempts == 0)
+cookie = {"Cookie": ck.split(";")[0]}
+st, body, _ = preq(pin_srv, "GET", f"/{ptok}/", headers=cookie)
+check("çerezle ana sayfa açılır", st == 200 and b"Kamerayla" in body)
+check("çerezle liste ve indirme çalışır", preq(pin_srv, "GET", f"/{ptok}/list", headers=cookie)[0] == 200
+      and preq(pin_srv, "GET", f"/{ptok}/d/0", headers=cookie)[1] == data)
+st, body, _ = preq(pin_srv, "POST", f"/{ptok}/up", data, {"X-Filename": "pin.pdf", **cookie})
+check("çerezle yükleme çalışır (kurallar aynı)", st == 200 and os.path.exists(os.path.join(tmp, "gelen_pin", "pin.pdf")), (st, body))
+st, body, _ = preq(pin_srv, "POST", f"/{ptok}/up", b"MZ\x90\x00" * 10, {"X-Filename": "x.exe", **cookie})
+check("çerezle de exe reddedilir (415)", st == 415)
+st, body, _ = preq(pin_srv, "POST", f"/{ptok}/up", b"x" * 400_000, {"X-Filename": "buyuk.pdf", **cookie})
+check("çerezle de boyut sınırı (413)", st == 413)
+check("sahte çerez 401", preq(pin_srv, "GET", f"/{ptok}/list", headers={"Cookie": "pdfsid=uydurma"})[0] == 401
+      and preq(pin_srv, "GET", f"/{ptok}/list", headers={"Cookie": "baska=" + cookie["Cookie"].split("=", 1)[1]})[0] == 401)
+check("çerez PIN'i içermez", "123456" not in cookie["Cookie"])
+t0 = pin_srv.idle_seconds()
+time.sleep(0.35)
+preq(pin_srv, "GET", f"/{ptok}/list")                    # yetkisiz istek boşta sayacını sıfırlamamalı
+check("yetkisiz istek boşta sayacını sıfırlamaz", pin_srv.idle_seconds() >= t0 + 0.3, str(pin_srv.idle_seconds()))
+preq(pin_srv, "GET", f"/{ptok}/list", headers=cookie)
+check("yetkili istek boşta sayacını sıfırlar", pin_srv.idle_seconds() < 0.3)
+
+# kilit: 5 yanlış deneme
+lock_dir = os.path.join(tmp, "gelen_kilit")
+ls = qrshare.ShareServer(lock_dir, pin="654321").start()
+lt = ls.token
+st, body, hd = preq(ls, "POST", f"/{lt}/auth", b"654321")
+good_cookie = {"Cookie": hd["Set-Cookie"].split(";")[0]}
+codes = []
+for k in range(5):
+    st, body, _ = preq(ls, "POST", f"/{lt}/auth", b"111111")
+    codes.append((st, json.loads(body).get("left")))
+check("4 yanlış 403 (kalan 4,3,2,1), 5. yanlış 423 kilit", [c[0] for c in codes] == [403, 403, 403, 403, 423] and [c[1] for c in codes[:4]] == [4, 3, 2, 1], str(codes))
+check("kilitli: locked True, hak 0", ls.locked and ls.attempts_left == 0)
+st, body, _ = preq(ls, "POST", f"/{lt}/auth", b"654321")
+check("kilitliyken DOĞRU PIN de reddedilir (423)", st == 423 and json.loads(body)["locked"] is True)
+check("kilitliyken yeni çerez verilmez", "Set-Cookie" not in preq(ls, "POST", f"/{lt}/auth", b"654321")[2])
+check("kilitten önce alınmış oturum geçerli kalır", preq(ls, "GET", f"/{lt}/list", headers=good_cookie)[0] == 200)
+check("kilitliyken çerezsiz erişim kapalı", preq(ls, "GET", f"/{lt}/list")[0] == 401)
+ls.unlock()
+check("unlock(): sayaç sıfır, aynı PIN çalışır", not ls.locked and preq(ls, "POST", f"/{lt}/auth", b"654321")[0] == 200)
+newp = ls.new_pin()
+check("new_pin(): yeni PIN, eski PIN ve oturumlar geçersiz", qrshare.valid_pin(newp) and not ls.locked
+      and preq(ls, "GET", f"/{lt}/list", headers=good_cookie)[0] == 401
+      and (preq(ls, "POST", f"/{lt}/auth", b"654321")[0] == 403 or newp == "654321"))
+ls.unlock()
+check("new_pin() ile yeni PIN girilebilir", preq(ls, "POST", f"/{lt}/auth", newp.encode())[0] == 200)
+ls.set_pin(None)
+check("set_pin(None): PIN kalkar, sayfa doğrudan açılır", not ls.pin_required and b"Kamerayla" in preq(ls, "GET", f"/{lt}/")[1])
+try:
+    ls.set_pin("12")
+    raised = False
+except ValueError:
+    raised = True
+check("set_pin geçersiz değeri reddeder", raised)
+ls.stop()
+pin_srv.stop()
+
 print(f"\nOZET: {sum(ok)}/{len(ok)} gecti")
 sys.stdout.flush()
 os._exit(0 if all(ok) else 1)

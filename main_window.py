@@ -50,6 +50,7 @@ from mw_nav import NavMixin
 from mw_notes import NotesMixin
 from mw_ocr import OcrMixin
 from mw_pages import PagesMixin
+from mw_share import ShareMixin
 from mw_sign import SignMixin
 from mw_workspace import WorkspaceMixin
 
@@ -59,7 +60,7 @@ from mw_workspace import WorkspaceMixin
 # ---------------------------------------------------------------------------
 class MainWindow(
     BuildMixin, ExportMixin, NotesMixin, AnnotMixin, NavMixin, PagesMixin, DocToolsMixin, SignMixin, FormsMixin,
-    OcrMixin, CompareMixin, WorkspaceMixin, QMainWindow,
+    OcrMixin, CompareMixin, WorkspaceMixin, ShareMixin, QMainWindow,
 ):
     def __init__(self):
         super().__init__()
