@@ -6,7 +6,7 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 ## Yapı
 | Dosya | Görev |
 |---|---|
-| `main_window.py` | `MainWindow`: menüler, üst çubuk, yüzen araç kapsülü + özellik çubuğu, sol panel, durum çubuğu, tüm eylemler |
+| `main_window.py` | `MainWindow` (bölünüyor: J1 bitti; J2'de mixin'ler `mw_*.py`): menüler, üst çubuk, yüzen araç kapsülü + özellik çubuğu, sol panel, durum çubuğu, tüm eylemler |
 | `views.py` | `PDFView` sürekli kaydırmalı görünüm (`PageItem`; işaretler sayfanın çocuk öğesi, koordinatlar sayfa pt), `ComparePane` |
 | `models.py` | Annotation sınıfları + `QUndoCommand`'lar, `DocumentSession` |
 | `pdf_engine.py` | `PDFDocument` (render, dışa aktarım `export_pdf(..., security, compress)`), filigran |
@@ -24,7 +24,7 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 | `ocr.py`, `fonts.py`, `gizmo.py` | OCR (Tesseract, `tessdata/`), yazı tipleri, boyutlandırma kulpları |
 | `ui/theme.py` | Renk belirteçleri (`current()`, `qcolor()`), QSS — yeni objectName stillerini buraya ekle |
 | `ui/icons.py` | Kendi SVG ikon seti: `icon(name, role)`; yeni ikon = `_PATHS`'e 24×24 çizgi SVG |
-| `ui/*.py` | overlays, sidepanel, welcome, toast, palette, kvkk, stamps, docdialogs, widgets, pagetools (üstbilgi/Bates + sayfa kırpma), comments (Yorumlar paneli + `ask_note_text`), signatures (`SignatureLibrary`, imza/dijital imza/rapor pencereleri), formui (Formlar paneli, `FormFieldDialog`, satır içi `FormFieldEditor`), workflow (`WorkflowDialog`: palet + sürüklenebilir zincir + `ParamForm` + şablon + hedef + ilerleme/rapor), compare (`CompareDiffPanel`: sayfa sayfa değişiklik listesi + süzgeç + önceki/sonraki), convert (`ConvertDialog` + `BackgroundJob`: `job(progress, cancelled)` havuzda, `done/failed` sinyali), a11y (`A11yDialog`: rapor + tek tıkla düzelt), share (`ShareDialog`: QR + gelenler + belgeyi sunma; sunucuyu `close()` durdurur), imgpdf (`ImagesPdfDialog(main, paths)`: sıralı liste + `start_export(out)`; `out` tek PDF'te dosya, ayrıda klasör), scanner (`ScanDialog(main, kaynaklar, start)`: `CornerView` + `Source`/`ScanPage`/`render_page`) |
+| `ui/*.py` | overlays, sidepanel, welcome, toast, palette, kvkk, stamps, docdialogs, widgets, pagetools (üstbilgi/Bates + sayfa kırpma), comments (Yorumlar paneli + `ask_note_text`), signatures (`SignatureLibrary`, imza/dijital imza/rapor pencereleri), formui (Formlar paneli, `FormFieldDialog`, satır içi `FormFieldEditor`), workflow (`WorkflowDialog`: palet + sürüklenebilir zincir + `ParamForm` + şablon + hedef + ilerleme/rapor), compare (`CompareDiffPanel`: sayfa sayfa değişiklik listesi + süzgeç + önceki/sonraki), convert (`ConvertDialog` + `BackgroundJob`: `job(progress, cancelled)` havuzda, `done/failed` sinyali), a11y (`A11yDialog`: rapor + tek tıkla düzelt), share (`ShareDialog`: QR + gelenler + belgeyi sunma; sunucuyu `close()` durdurur), imgpdf (`ImagesPdfDialog(main, paths)`: sıralı liste + `start_export(out)`; `out` tek PDF'te dosya, ayrıda klasör), textdialog (`TextDialog`, `ocr_text_width`), ocrdialog (`_OcrTask`/`_OcrSignals` arka plan işçisi + `OcrDialog`), watermark (`WatermarkDialog`), scanner (`ScanDialog(main, kaynaklar, start)`: `CornerView` + `Source`/`ScanPage`/`render_page`) |
 
 ## Kurallar
 - Yeni eylem: `_build_menus()` içinde `A(menu, ikon, "Metin", slot, "Kısayol")` — komut paletine (Ctrl+K) otomatik girer.
@@ -78,5 +78,5 @@ C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğr
 D1 tamam (iki sürümün metin farkı: yeşil/kırmızı vurgu, sayfa sayfa liste, listeden git) ·
 D2 tamam (Word/Excel dönüştürme, erişilebilirlik denetimi + tek tıkla düzeltme; pdf2docx ve openpyxl `requirements.txt`'te) ·
 F tamam (QR ile telefondan dosya alma + açık belgeyi telefona sunma; segno `requirements.txt`'te) ·
-G1 tamam (`scan.py` tarama çekirdeği; opencv-python-headless + numpy `requirements.txt`'te) · G2 tamam (`ui/scanner.py` tarayıcı penceresi: görsel/PDF kaynağı, köşe kulpları, filtre, OCR'lı PDF) · G3 tamam (telefon fotoğrafları → tarayıcı kuyruğu; Görselleri PDF'e çevir) · H1 tamam (iş akışı: `a11y_fix`, `to_word` + `check_workflow.py`) · H2 tamam (metin farkı HTML/PDF raporu).
+G1 tamam (`scan.py` tarama çekirdeği; opencv-python-headless + numpy `requirements.txt`'te) · G2 tamam (`ui/scanner.py` tarayıcı penceresi: görsel/PDF kaynağı, köşe kulpları, filtre, OCR'lı PDF) · G3 tamam (telefon fotoğrafları → tarayıcı kuyruğu; Görselleri PDF'e çevir) · H1 tamam (iş akışı: `a11y_fix`, `to_word` + `check_workflow.py`) · H2 tamam (metin farkı HTML/PDF raporu) · J1 tamam (bağımsız diyaloglar `main_window.py`'dan `ui/`'a taşındı; davranış aynı).
 **Sıradaki aşamalar (G1…K) ve her biri için hazır istem: `YOLHARITASI.md`** — yeni sohbette yalnızca ilgili aşama bölümünü oku.

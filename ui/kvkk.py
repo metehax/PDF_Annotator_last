@@ -24,6 +24,7 @@ from PySide6.QtWidgets import (
 import ocr
 import pii
 from models import AddAnnotationCommand, RedactionAnnotation
+from ui.ocrdialog import _OcrTask
 from ui.icons import icon
 
 _HIT_ROLE = Qt.ItemDataRole.UserRole + 10
@@ -130,7 +131,6 @@ class KvkkDialog(QDialog):
 
     # -- tarama -----------------------------------------------------------------
     def _scan(self):
-        from main_window import _OcrTask          # döngüsel içe aktarımı önlemek için burada
         s = self._session
         kinds = [k for k, c in self.kind_checks.items() if c.isChecked()]
         if not kinds:
