@@ -49,7 +49,7 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/formui.py`   | Formlar paneli, alan özellikleri penceresi, sayfa üstündeki alan düzenleyicisi |
 | `ui/signatures.py` | Elektronik imza (çiz/yaz/görsel), imza kütüphanesi, dijital imza ve doğrulama pencereleri |
 | `digisign.py`    | Dijital imza (pyhanko): .pfx ile imzalama, doğrulama, sonradan değişiklik denetimi |
-| `workflow.py`   | **Görsel iş akışı çekirdeği:** adım türleri (OCR, döndür, filigran, sayfa numarası, KVKK, sıkıştır, parola, kaydet), şablon kütüphanesi, çalıştırıcı (tek dosya / toplu), sonuç raporu |
+| `workflow.py`   | **Görsel iş akışı çekirdeği:** adım türleri (OCR, döndür, filigran, sayfa numarası, KVKK, erişilebilirlik düzeltmesi, sıkıştır, parola, Word'e dönüştür, kaydet), şablon kütüphanesi, çalıştırıcı (tek dosya / toplu), sonuç raporu |
 | `ui/workflow.py` | İş akışı penceresi: adım paleti, sürükleyerek sıralanan zincir, ayar paneli, şablon, hedef seçimi, ilerleme/durdurma, sonuç tablosu |
 | `textdiff.py`   | **Metin farkı çekirdeği:** iki belgenin metnini satır + kelime düzeyinde karşılaştırır (eklenen / silinen / değişen, sayfa konumlarıyla) |
 | `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
@@ -300,14 +300,17 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
 **Belge → Görsel iş akışı (Ctrl+Shift+W)** kod yazmadan adım zinciri kurar; belge açık olmasa da çalışır.
 
 * **Adımlar:** OCR · Döndür · Filigran · Sayfa numarası/üstbilgi (Bates dahil) · KVKK karartma · Sıkıştır ·
-  Parola/izinler · Kaydet. Çift tıklayarak ya da zincire sürükleyerek eklenir; zincirdeki kartlar sürüklenerek
+  Erişilebilirlik düzeltmeleri (dil, başlık, yer imleri) · Parola/izinler · Word'e dönüştür · Kaydet. Çift tıklayarak ya da zincire sürükleyerek eklenir; zincirdeki kartlar sürüklenerek
   yeniden sıralanır, onay kutusu adımı atlar, çöp kutusu siler. Seçili adımın ayarları sağda açılır.
   Hazır motorlar yeniden kullanılır (ocr, headfoot, pii, docsec, filigran) — ayrı bir uygulama yolu yoktur.
-* **Sıra kuralı:** sayfaları değiştiren adımlar yazıldığı sırayla çalışır; **Sıkıştır, Parola ve Kaydet** sırası ne olursa
+* **Sıra kuralı:** sayfaları değiştiren adımlar yazıldığı sırayla çalışır; **Sıkıştır, Parola, Word'e dönüştür ve Kaydet** sırası ne olursa
   olsun en sonda, tek kayıtta uygulanır. Zincir olası sıra hatalarını önceden uyarır (örn. filigran OCR'dan önceyse
-  metinli sayılan sayfalarda OCR atlanabilir; KVKK OCR'dan önceyse taranmış sayfada veri bulunamaz).
-* **Şablonlar:** Kaydet / Farklı kaydet / Sil, JSON olarak dışa-içe aktarma. 4 hazır şablon var
-  (Taranmış belgeyi düzenle, KVKK paylaşım kopyası, Arşiv paketi, Dosya hazırlığı/Bates); hazırların üstüne yazılmaz.
+  metinli sayılan sayfalarda OCR atlanabilir; KVKK ya da yer imi üretimi OCR'dan önceyse taranmış sayfada veri/başlık bulunamaz).
+  **Word'e dönüştür** sonucu PDF yerine `.docx` yazar (özgün PDF'in üstüne asla yazılmaz; sıkıştırma/parola uygulanmaz,
+  zincir bunu uyarır). **Erişilebilirlik düzeltmeleri** boş bırakılan başlıkta mevcut anlamlı başlığı korur, yoksa dosya adını yazar;
+  var olan yer imlerine dokunmaz.
+* **Şablonlar:** Kaydet / Farklı kaydet / Sil, JSON olarak dışa-içe aktarma. 6 hazır şablon var
+  (Taranmış belgeyi düzenle, KVKK paylaşım kopyası, Arşiv paketi, Dosya hazırlığı/Bates, Erişilebilir PDF, Word'e aktar); hazırların üstüne yazılmaz.
   Parola adımında "çalıştırırken sor" açıkken parola şablona ya da ayarlara **yazılmaz**.
 * **Hedef:** açık belge (işaretleriyle birlikte işlenir; özgün belge değişmez), seçilen dosyalar (PDF ve resimler) ya da
   bütün klasör (alt klasörler dahil; çıktı ekini taşıyan dosyalar tekrar işlenmez).

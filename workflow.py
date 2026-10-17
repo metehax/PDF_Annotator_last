@@ -5,10 +5,11 @@ Görsel iş akışı çekirdeği (arayüzsüz): adım zinciri, şablon kütüpha
 
 Bir iş akışı sıralı adımlardır; her adım mevcut motoru yeniden kullanır:
   ocr (ocr.py) · rotate · watermark (pdf_engine) · headfoot (headfoot.py) · kvkk (pii.py)
-  compress / password (docsec.py) · save (çıktı adı/yeri)
+  a11y_fix (a11y.py: dil/başlık/yer imi) · compress / password (docsec.py) · to_word (convert.py)
+  save (çıktı adı/yeri)
 
 Sayfaları değiştiren adımlar yazıldığı sırayla çalışır. "Kaydederken uygulanan" adımlar
-(compress, password, save) sırası ne olursa olsun en sonda, tek kayıtta uygulanır.
+(compress, password, to_word, save) sırası ne olursa olsun en sonda, tek kayıtta uygulanır.
 Çıktı her zaman geçici dosyaya yazılıp atomik olarak yerine konur; iptalde yarım dosya kalmaz.
 """
 from __future__ import annotations
@@ -27,6 +28,8 @@ from typing import Any, Callable, Dict, List, Optional, Tuple
 
 import pymupdf as fitz
 
+import a11y
+import convert
 import docsec
 import ocr
 import pii
@@ -126,6 +129,7 @@ class Ctx:
         self.security: Optional[docsec.SecurityOptions] = None
         self.compress: Optional[str] = None
         self.save: Optional[dict] = None
+        self.to_word: Optional[dict] = None
 
     def check(self):
         if self.cancelled is not None and self.cancelled():
@@ -236,6 +240,49 @@ def _run_kvkk(ctx: Ctx, p: dict) -> str:
         ctx.inner((i + 1) / n, f"KVKK taraması {i + 1}/{n}")
     note = "" if ocr_env or not p["ocr"] else " (OCR kurulu değil; taranmış sayfalar atlandı)"
     return f"{total} kişisel veri karartıldı{note}"
+
+
+def _a11y_toc(doc) -> List[list]:
+    """Başlık sezgisinden geçerli bir yer imi listesi ([düzey, metin, sayfa]); düzey atlamaları kapatılır."""
+    toc: List[list] = []
+    prev = 0
+    for lvl, text, page, _size in a11y.detect_headings(doc):
+        lvl = max(1, min(int(lvl), prev + 1))
+        toc.append([lvl, text, int(page)])
+        prev = lvl
+    return toc
+
+
+def _run_a11y_fix(ctx: Ctx, p: dict) -> str:
+    keys: List[str] = []
+    lang = p["lang"].strip()
+    if lang:
+        keys.append("lang")
+    title = ""
+    if p["set_title"]:
+        keys.append("title")
+        title = p["title"].strip()
+        if not title:                                   # mevcut anlamlı başlık korunur, yoksa dosya adı
+            cur = (ctx.doc.metadata or {}).get("title", "") or ""
+            title = "" if cur.strip() and not a11y._FILENAME_TITLE.search(cur.strip()) else ctx.name
+    toc = None
+    notes: List[str] = []
+    if p["bookmarks"]:
+        if ctx.doc.get_toc():
+            notes.append("yer imi zaten var")
+        else:
+            toc = _a11y_toc(ctx.doc)
+            keys.append("bookmarks")
+            if not toc:
+                notes.append("başlık bulunamadı, yer imi yok")
+    ctx.check()
+    done = a11y.apply_fixes(ctx.doc, keys, lang=lang or "tr-TR", title=title, toc=toc)
+    return " · ".join(done + notes) or "Değişiklik yapılmadı"
+
+
+def _run_to_word(ctx: Ctx, p: dict) -> str:
+    ctx.to_word = dict(p)
+    return "Çıktı Word (.docx) olarak yazılır"
 
 
 def _run_compress(ctx: Ctx, p: dict) -> str:
@@ -360,6 +407,18 @@ STEP_TYPES: Dict[str, StepType] = {t.key: t for t in [
                     hint="Taranmış belgelerde kişisel veriyi bulmak için gerekli"),
               Param("color", "Kutu rengi", "color", "#000000")],
              _run_kvkk, lambda p: ", ".join(pii.CATEGORIES[k] for k in p["kinds"]) or "Veri türü seçilmedi"),
+    StepType("a11y_fix", "Erişilebilirlik düzeltmeleri", "Belge dilini, başlığını ayarlar; başlıklardan yer imleri üretir.",
+             "eye", _PAGE,
+             [Param("lang", "Belge dili", "text", "tr-TR", hint="BCP 47 kodu (tr-TR, en-US…); boş: dili değiştirme"),
+              Param("set_title", "Belge başlığını ata ve pencere başlığında göster", "bool", True),
+              Param("title", "Başlık", "text", "", show_if=("set_title", True),
+                    hint="Boşsa mevcut anlamlı başlık korunur, yoksa dosya adı kullanılır"),
+              Param("bookmarks", "Başlıklardan yer imi oluştur (yoksa)", "bool", False,
+                    hint="Metin katmanı olmayan (taranmış) belgede önce OCR çalıştırın")],
+             _run_a11y_fix, lambda p: " · ".join(
+                 x for x in ((f"dil {p['lang']}" if p["lang"].strip() else ""),
+                             ("başlık" if p["set_title"] else ""), ("yer imleri" if p["bookmarks"] else "")) if x)
+             or "Değişiklik yok"),
     StepType("password", "Parola / izinler", "Açma parolası ve izin kısıtlamaları (kaydederken uygulanır).", "lock", _FINAL,
              [Param("ask", "Çalıştırırken parolayı sor (şablona yazılmaz)", "bool", True),
               Param("user_password", "Açma parolası", "password", "", show_if=("ask", False),
@@ -370,6 +429,9 @@ STEP_TYPES: Dict[str, StepType] = {t.key: t for t in [
              _run_password, lambda p: ("parola çalıştırırken sorulur" if p["ask"] else
                                        docsec.SecurityOptions(p["user_password"], p["owner_password"], set(p["allowed"])).describe())
              + (" · kısıtlı" if set(p["allowed"]) != docsec.ALL_PERMS and p["ask"] else "")),
+    StepType("to_word", "Word'e dönüştür", "Sonucu PDF yerine Word (.docx) olarak kaydeder (en sonda uygulanır).",
+             "download", _FINAL, [],
+             _run_to_word, lambda p: "çıktı .docx (sıkıştırma/parola uygulanmaz)"),
     StepType("save", "Kaydet", "Çıktının adını ve yerini belirler (en sonda uygulanır).", "save", _FINAL,
              [Param("mode", "Nereye", "choice", "suffix", [(k, v) for k, v in SAVE_MODES.items()]),
               Param("suffix", "Ada eklenecek", "text", DEFAULT_SUFFIX, show_if=("mode", "suffix")),
@@ -379,7 +441,7 @@ STEP_TYPES: Dict[str, StepType] = {t.key: t for t in [
              _run_save, lambda p: (f"…{p['suffix']}.pdf, aynı klasöre" if p["mode"] == "suffix" else
                                    f"{p['folder'] or '(klasör seçilmedi)'}" if p["mode"] == "folder" else "özgün dosyanın üstüne")),
 ]}
-STEP_ORDER = ["ocr", "rotate", "watermark", "headfoot", "kvkk", "compress", "password", "save"]
+STEP_ORDER = ["ocr", "rotate", "watermark", "headfoot", "kvkk", "a11y_fix", "compress", "password", "to_word", "save"]
 
 
 # ---------------------------------------------------------------------------
@@ -451,7 +513,7 @@ class Workflow:
         if not act:
             return [("uyarı", "Zincirde etkin adım yok")]
         pos = {t: [i for i, s in enumerate(act) if s.type == t] for t in STEP_TYPES}
-        for t in ("save", "compress", "password"):
+        for t in ("save", "compress", "password", "to_word"):
             if len(pos[t]) > 1:
                 out.append(("uyarı", f"Birden çok '{STEP_TYPES[t].title}' adımı var; sonuncusu geçerli"))
         if pos["ocr"]:
@@ -460,6 +522,9 @@ class Workflow:
                 if any(i < first_ocr for i in pos[t]):
                     out.append(("uyarı", f"'{STEP_TYPES[t].title}' OCR'dan önce: eklenen metin yüzünden sayfalar "
                                          "metinli sayılır ve OCR atlanabilir; OCR'ı öne alın"))
+            for i in pos["a11y_fix"]:
+                if i < first_ocr and act[i].params["bookmarks"]:
+                    out.append(("uyarı", "Yer imi üretimi OCR'dan önce: taranmış sayfalarda başlık bulunamaz; OCR'ı öne alın"))
             for i in pos["kvkk"]:
                 if i < first_ocr and not act[i].params["ocr"]:
                     out.append(("uyarı", "KVKK karartma OCR'dan önce ve kendi OCR seçeneği kapalı: taranmış "
@@ -472,6 +537,9 @@ class Workflow:
             p = act[i].params
             if not any(p[k].strip() for k in ("f_left", "f_center", "f_right", "h_left", "h_center", "h_right")):
                 out.append(("uyarı", "Sayfa numarası adımında tüm metinler boş"))
+        if pos["to_word"] and (pos["compress"] or any(not act[i].params["ask"] or act[i].params["user_password"]
+                                                      for i in pos["password"])):
+            out.append(("uyarı", "Word çıktısına sıkıştırma ve parola uygulanmaz"))
         if pos["save"] and pos["save"][0] != len(act) - 1:
             out.append(("bilgi", "Kaydet adımı sırası ne olursa olsun en sonda uygulanır"))
         if not pos["save"]:
@@ -499,6 +567,10 @@ BUILTINS: List[Workflow] = [
     _wf("Dosya hazırlığı (Bates)", "Her sayfaya Bates numarası ve sayfa numarası yaz.",
         ("headfoot", {"f_left": "{bates}", "f_center": "", "f_right": "{sayfa} / {toplam}", "bates_prefix": "DOS-"}),
         ("save", {"suffix": "_bates"})),
+    _wf("Erişilebilir PDF", "OCR, belge dili/başlığı ve yer imleri.",
+        ("ocr", {}), ("a11y_fix", {"bookmarks": True}), ("save", {"suffix": "_erisilebilir"})),
+    _wf("Word'e aktar", "OCR ile metni çıkar, düzenlenebilir Word belgesi üret.",
+        ("ocr", {}), ("to_word", {}), ("save", {"suffix": "_word"})),
 ]
 
 
@@ -696,7 +768,30 @@ def _open_source(src: Source, password: str = ""):
     return doc
 
 
+def _write_word(ctx: Ctx, src: Source, default_dir: str, res: FileResult) -> None:
+    """`to_word` adımı: sonuç PDF yerine .docx. Özgün PDF'in üstüne asla yazılmaz."""
+    path, overwrite, _backup = resolve_output(ctx.save, src, default_dir)
+    if overwrite:                                   # özgün PDF'i ezme: ada ek getir
+        path = os.path.splitext(src.path)[0] + DEFAULT_SUFFIX + ".pdf"
+    path = _unique(os.path.splitext(path)[0] + ".docx")
+    os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
+    data = ctx.doc.tobytes()
+    ctx.check()
+    try:
+        cr = convert.to_docx(data, path, None, ctx.cancelled)
+    except convert.Cancelled:
+        raise Cancelled()
+    except convert.ConvertError as ex:
+        raise StepError(str(ex)) from ex
+    res.output = path
+    res.size_after = os.path.getsize(path)
+    if cr.notes:
+        res.message = " ".join(cr.notes)
+
+
 def _write_output(ctx: Ctx, src: Source, default_dir: str, res: FileResult) -> None:
+    if ctx.to_word is not None:
+        return _write_word(ctx, src, default_dir, res)
     path, overwrite, backup = resolve_output(ctx.save, src, default_dir)
     os.makedirs(os.path.dirname(path) or ".", exist_ok=True)
     kwargs = docsec.apply_compression(ctx.doc, ctx.compress)
