@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 import qrshare
+import workspace
 from pdf_engine import IMAGE_EXTS
 from ui.icons import icon
 
@@ -45,7 +46,7 @@ class ShareDialog(QDialog):
         self._main = main
         self._server: Optional[qrshare.ShareServer] = None
         self._tmp: Optional[str] = None
-        self._receive_dir = receive_dir or str(main.settings.value("qrReceiveDir", "") or default_receive_dir())
+        self._receive_dir = receive_dir or str(main.settings.value("qrReceiveDir", "") or workspace.out_dir("inbox") or default_receive_dir())
         self._forced_host = host
 
         v = QVBoxLayout(self)

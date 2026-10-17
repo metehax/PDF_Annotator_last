@@ -19,6 +19,7 @@ from pdf_engine import (
 )
 from ui.watermark import WatermarkDialog
 from mw_common import OPEN_FILTER
+import workspace
 
 
 class ExportMixin:
@@ -219,7 +220,8 @@ class ExportMixin:
         s = self.active_session
         if not s:
             return
-        default = os.path.splitext(s.path)[0] + ".pdfproj.json"
+        stem = os.path.splitext(os.path.basename(s.path))[0] + ".pdfproj.json"
+        default = workspace.join_out("projects", stem, os.path.dirname(s.path))
         path, _ = QFileDialog.getSaveFileName(self, "Proje Kaydet", default, "PDF Proje (*.json)")
         if not path:
             return
@@ -232,7 +234,8 @@ class ExportMixin:
             QMessageBox.critical(self, "Hata", f"Proje kaydedilemedi:\n{ex}")
 
     def open_project(self):
-        path, _ = QFileDialog.getOpenFileName(self, "Proje Aç", "", "PDF Proje (*.json)")
+        start = workspace.out_dir("projects") or workspace.last_dir()
+        path, _ = QFileDialog.getOpenFileName(self, "Proje Aç", start, "PDF Proje (*.json)")
         if not path:
             return
         try:

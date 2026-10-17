@@ -29,6 +29,7 @@ from fonts import register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon
 import docsec
+import workspace
 from ui.palette import Command, CommandPalette
 from ui.signatures import SignatureLibrary
 from ui.stamps import StampLibrary
@@ -50,6 +51,7 @@ from mw_notes import NotesMixin
 from mw_ocr import OcrMixin
 from mw_pages import PagesMixin
 from mw_sign import SignMixin
+from mw_workspace import WorkspaceMixin
 
 
 # ---------------------------------------------------------------------------
@@ -57,7 +59,7 @@ from mw_sign import SignMixin
 # ---------------------------------------------------------------------------
 class MainWindow(
     BuildMixin, ExportMixin, NotesMixin, AnnotMixin, NavMixin, PagesMixin, DocToolsMixin, SignMixin, FormsMixin,
-    OcrMixin, CompareMixin, QMainWindow,
+    OcrMixin, CompareMixin, WorkspaceMixin, QMainWindow,
 ):
     def __init__(self):
         super().__init__()
@@ -76,6 +78,7 @@ class MainWindow(
         self.undo_group = QUndoGroup(self)
         self.night_mode = False
         self.settings = QSettings("PDFAnnotator", "PDFAnnotator")
+        workspace.configure(self.settings)
         saved_theme = self.settings.value("theme", "")
         self.dark_mode = (saved_theme == "dark") if saved_theme in ("dark", "light") \
             else ui_theme.system_prefers_dark()
@@ -690,8 +693,9 @@ class MainWindow(
 
     def open_pdf(self):
         paths, _ = QFileDialog.getOpenFileNames(self, "PDF / Resim Aç (birden fazla seçilebilir)",
-                                                 "", OPEN_FILTER)
+                                                 workspace.last_dir(), OPEN_FILTER)
         if paths:
+            workspace.remember(paths[0])
             self.open_paths(paths)
 
     def refresh_doc_tabs(self):
@@ -774,6 +778,7 @@ class MainWindow(
         if s is not None:
             s.dirty = False
             s.undo_stack.setClean()
+            self._drop_draft(s)
             self.refresh_doc_tabs()
 
     def _confirm_discard(self, s) -> bool:
@@ -806,6 +811,7 @@ class MainWindow(
         if confirm and not self._confirm_discard(self.sessions[idx]):
             return
         closing = self.sessions[idx]
+        self._drop_draft(closing)
         was_active = closing is self.active_session
         self.sessions.pop(idx)
         self.undo_group.removeStack(closing.undo_stack)
@@ -846,6 +852,8 @@ class MainWindow(
             if not self._confirm_discard(s):
                 event.ignore()
                 return
+        for s in self.sessions:
+            self._drop_draft(s)                  # normal kapanış: kurtarma taslağı gerekmez
         share = getattr(self, "_share_dialog", None)
         if share is not None:
             share.close()                        # telefon aktarım sunucusu durur
@@ -934,6 +942,7 @@ def main():
     win.show()
     if files:
         QTimer.singleShot(0, lambda: win.open_paths(files))
+    QTimer.singleShot(600, win.startup_checks)        # taşıma önerisi, kapanmayan belgeler, otomatik kurtarma
     sys.exit(app.exec())
 
 

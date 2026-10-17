@@ -229,6 +229,7 @@ class BuildMixin:
         m_edit.addSeparator()
         A(m_edit, "search", "Bul…", self._focus_search, "Ctrl+F")
         A(m_edit, "sliders", "Komut paleti…", self.open_palette, "Ctrl+K", needs_doc=False)
+        A(m_edit, "sliders", "Tercihler…", self.open_preferences, "Ctrl+,", needs_doc=False)
 
         m_view = QMenu("Görünüm", self)
         A(m_view, "zoom_in", "Yakınlaştır", lambda: self.view.animate_zoom(self.view.zoom() * 1.25), "Ctrl+=")

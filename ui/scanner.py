@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 import convert
 import ocr
 import scan
+import workspace
 from ui import theme
 from ui.convert import BackgroundJob
 from ui.icons import icon
@@ -701,8 +702,9 @@ class ScanDialog(QDialog):
         if not self.pages:
             return None
         first = self.pages[0].src
-        base = os.path.splitext(first.path)[0] + "_tarama" if first.path else os.path.join(
-            os.path.expanduser("~"), "Documents", "tarama")
+        stem = os.path.splitext(os.path.basename(first.path))[0] + "_tarama" if first.path else "tarama"
+        fallback = os.path.dirname(first.path) if first.path else os.path.join(os.path.expanduser("~"), "Documents")
+        base = workspace.join_out("scans", stem, fallback)
         out, _ = QFileDialog.getSaveFileName(self, "PDF olarak kaydet", base + ".pdf", "PDF (*.pdf)")
         if not out:
             return None

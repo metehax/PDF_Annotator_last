@@ -19,6 +19,7 @@ from PySide6.QtWidgets import (
 )
 
 import convert
+import workspace
 from ui.icons import icon
 
 
@@ -153,8 +154,9 @@ class ConvertDialog(QDialog):
         xl = self.fmt == "xlsx"
         self.chk_num.setVisible(xl)
         self.dec.setVisible(xl)
-        base = os.path.splitext(self._s.path)[0] if self._s.path else os.path.join(
-            os.path.expanduser("~"), "Documents", "belge")
+        stem = os.path.splitext(os.path.basename(self._s.path))[0] if self._s.path else "belge"
+        fallback = os.path.dirname(self._s.path) if self._s.path else os.path.join(os.path.expanduser("~"), "Documents")
+        base = workspace.join_out("converted", stem, fallback)
         self.path.setText(base + (".xlsx" if xl else ".docx"))
         self.hint.setText(
             "Her tablo ayrı bir Excel sayfasına yazılır; ilk satır başlık sayılır. Çizgisiz tablolar algılanamayabilir."

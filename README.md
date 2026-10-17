@@ -58,6 +58,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `scan.py`       | **Belge tarama** çekirdeği (OpenCV, arayüzsüz): fotoğraftan kâğıt köşelerini bulma, perspektif düzeltme, döndürme, 6 filtre (orijinal/otomatik/belge/gri/canlı/gölgesiz renkli), sayfaları PDF'e aktarma. Arayüzü G2'de |
 | `ui/scanner.py` | **Belge tara** penceresi: köşe kulpları (otomatik + elle), filtre kartları, parlaklık/kontrast, döndür, sayfa şeridi, PDF/OCR üretimi |
 | `ui/imgpdf.py`  | **Görselleri PDF'e çevir** penceresi: sürükle-bırak, sıralama, sayfa boyutu/yön/kenar boşluğu/kalite, tek ya da ayrı PDF |
+| `workspace.py`  | **Çalışma klasörü + otomatik kurtarma çekirdeği:** kök/alt klasörler (Gelen, Taramalar, Donusturulenler, Projeler, Yedekler, IsAkisi), çıktı tercihleri, son klasör, eski gelen klasörü taşıma, kurtarma taslakları |
+| `ui/preferences.py` | **Tercihler** penceresi (Düzenle → Tercihler…, Ctrl+,) |
 | `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno) |
 | `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
@@ -395,3 +397,17 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 ## Yeni: Görselleri PDF'e çevir ve telefondan taramaya aktarma
 * **Dosya → Görselleri PDF'e çevir…:** görselleri (ya da klasörü) pencereye sürükleyin/ekleyin, sırayı düzenleyin; sayfa boyutu (A4/Letter/orijinal), yön, kenar boşluğu ve JPEG kalitesi seçin. **Tek PDF** ya da **her görsel ayrı PDF** (var olan ad bozulmaz); sonuç uygulamada açılır (ayrıda en çok 10 sekme).
 * **Telefonla aktar (QR) → "Gelen fotoğrafları tarayıcıda aç":** gelen fotoğraflar belge olarak açılmaz, birikir; **Taramayı bitir (N)** hepsini Belge tara penceresinde açar. PDF'ler eskisi gibi açılır.
+
+## Yeni: Tercihler, çalışma klasörü ve otomatik kurtarma
+**Düzenle → Tercihler… (Ctrl+,)** değişiklikleri anında kaydeder.
+
+* **Çalışma klasörü:** varsayılan `Belgeler\PDF Annotator`; Seç / Aç / Sıfırla. Altında `Gelen` (QR ile gelenler), `Taramalar`,
+  `Donusturulenler` (Word/Excel), `Projeler`, `Yedekler`, `IsAkisi`. Her tür için "çalışma klasörüne kaydet" kutusu vardır;
+  açıkken ilgili pencere (QR gelenleri, Belge tara, Word/Excel dönüştür, proje kaydet/aç, iş akışı varsayılan hedefi)
+  varsayılan yol olarak orayı önerir, kapalıyken eski davranışa (belgenin yanı) döner. Pencerede elle seçtiğiniz yol her zaman önceliklidir.
+  Eski `Belgeler\PDF Annotator Gelen` klasöründe dosya varsa açılışta **taşıma önerilir** (dosyalar silinmez, aynı ad ezilmez).
+* **Otomatik kurtarma:** açıkken (1–10 dk, varsayılan 3) değişmiş belgelerin taslağı `Yedekler\kurtarma`'ya yazılır (belge + işaretler).
+  Uygulama beklenmedik kapanırsa sonraki açılışta *Kurtar / Şimdilik değil / Sil* sorulur; kurtarılan belge değişmiş sayılır, özgün
+  yoluyla açılır. Kaydetme ve normal kapanış taslağı siler. **Parolalı belgeler düz metin yedeklenmesin diye yedeklenmez.**
+* **Genel:** tema (sistem/açık/koyu), son kullanılan klasörü hatırlama (Aç penceresi).
+* Çalışma klasörünü `PDF_ANNOTATOR_WORKSPACE` ortam değişkeniyle de belirleyebilirsiniz (ayarı geçersiz kılar).

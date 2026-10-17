@@ -26,6 +26,7 @@ from PySide6.QtWidgets import (
 
 import docsec
 import workflow as wfm
+import workspace
 from ui import theme
 from ui.icons import icon, pixmap as icon_pixmap
 
@@ -850,7 +851,8 @@ class WorkflowDialog(QDialog):
         self._main.settings.setValue("workflow_last", json.dumps(self.wf.to_dict(), ensure_ascii=False))
         self.table.setRowCount(0)
         self.report = None
-        task = _WfTask(self.wf.copy(), sources, self.out_edit.text().strip(), getattr(self._main, "font_ctx", None), overrides)
+        default_out = self.out_edit.text().strip() or (workspace.out_dir("workflow") or "")
+        task = _WfTask(self.wf.copy(), sources, default_out, getattr(self._main, "font_ctx", None), overrides)
         task.sig.progress.connect(self._on_progress)
         task.sig.result.connect(self._on_result)
         task.sig.done.connect(self._on_done)
