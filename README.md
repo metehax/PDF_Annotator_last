@@ -51,7 +51,7 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `digisign.py`    | Dijital imza (pyhanko): .pfx ile imzalama, doğrulama, sonradan değişiklik denetimi |
 | `workflow.py`   | **Görsel iş akışı çekirdeği:** adım türleri (OCR, döndür, filigran, sayfa numarası, KVKK, erişilebilirlik düzeltmesi, sıkıştır, parola, Word'e dönüştür, kaydet), şablon kütüphanesi, çalıştırıcı (tek dosya / toplu), sonuç raporu |
 | `ui/workflow.py` | İş akışı penceresi: adım paleti, sürükleyerek sıralanan zincir, ayar paneli, şablon, hedef seçimi, ilerleme/durdurma, sonuç tablosu |
-| `textdiff.py`   | **Metin farkı çekirdeği:** iki belgenin metnini satır + kelime düzeyinde karşılaştırır (eklenen / silinen / değişen, sayfa konumlarıyla) |
+| `textdiff.py`   | **Metin farkı çekirdeği:** iki belgenin metnini satır + kelime düzeyinde karşılaştırır (eklenen / silinen / değişen, sayfa konumlarıyla) ve `report_html` karşılaştırma raporu |
 | `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
 | `convert.py`    | **PDF → Word** (pdf2docx) ve **PDF → Excel** (PyMuPDF `find_tables` + openpyxl) çekirdeği |
 | `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
@@ -330,6 +330,8 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   Eklenen / Silinen / Değişen süzgeçleri vardır; süzgeç vurguları da günceller.
 * **Listeden git:** bir satıra tıklamak iki paneli de ilgili sayfaya götürür ve değişikliği mavi halkayla işaretler.
   Eklemede eski belgede, silmede yeni belgede karşılık gelen nokta gösterilir. **F8 / Shift+F8** sonraki / önceki değişikliğe geçer.
+* **Rapor:** panelin altındaki **Raporu kaydet…** sayfa sayfa *eski | yeni* tablosunu HTML ya da PDF olarak yazar (eklenen yeşil,
+  silinen kırmızı çizgili; değişen parçada yalnızca farklı kelimeler vurgulanır; belge metni kaçışlanır). Süzgeçten bağımsız tüm değişiklikler girer.
 * **Nasıl çalışır:** önce satır, sonra değişen satırların içinde kelime düzeyinde fark alınır (arka planda, arayüz donmaz).
   Sol/sağ belge ya da "Büyük/küçük harfi yoksay" değişince otomatik yeniden hesaplanır.
 * **Sınırlar:** yalnızca metin katmanı karşılaştırılır; taranmış (metinsiz) belge için önce OCR gerekir (panel uyarır).

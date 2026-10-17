@@ -91,6 +91,29 @@ pm = pr.doc[0].get_pixmap(clip=fitz.Rect(*lines[0][0].rect), alpha=False)
 dark = sum(1 for i in range(0, len(pm.samples), pm.n) if pm.samples[i] < 100)
 check("rect gercekten metnin ustunde", dark > 5, dark)
 
+# ---- rapor (cekirdek)
+rep = textdiff.report_html(res, "eski <v1>.pdf", "yeni & v2.pdf")
+check("rapor: html iskeleti + basliklar", rep.startswith("<!doctype html>") and "Metin karşılaştırma raporu" in rep and rep.rstrip().endswith("</html>"))
+check("rapor: belge adlari kacisli", "eski &lt;v1&gt;.pdf" in rep and "yeni &amp; v2.pdf" in rep and "<v1>" not in rep)
+check("rapor: sayfa basliklari (1 ve 2)", "Sayfa 1 " in rep and "Sayfa 2 " in rep and "Sayfa 3 " not in rep)
+check("rapor: ozet metni", res.summary() in rep or res.summary().replace("&", "&amp;") in rep)
+check("rapor: eski | yeni sutunlari", rep.count("<th") == 3 * 2 and ">Eski<" in rep and ">Yeni<" in rep)
+check("rapor: eklenen yesil, silinen kirmizi", "#c8f0d4" in rep and "#f8cfd0" in rep and "line-through" in rep)
+check("rapor: degisen sozcuk vurgulu (1000 kirmizi, 2500 yesil)", ">1000</span>" in rep and ">2500</span>" in rep
+      and rep.index(">1000</span>") < rep.index(">2500</span>"))
+check("rapor: degismeyen sozcuk vurgusuz", "<span style='background-color:#f8cfd0;color:#8a1c1c;text-decoration:line-through'>Bedel" not in rep)
+check("rapor: tur etiketleri", all(t in rep for t in ("Eklendi", "Silindi", "Değişti")))
+ci = textdiff.report_html(textdiff.compare(pa, PDFDocument(A)), "a", "b", ignore_case=True)
+check("rapor: fark yoksa 'ayni' notu + harf notu", "Metinler aynı" in ci and "yok sayıldı" in ci and "<table" not in ci)
+D1, D2 = os.path.join(tmp, "x1.pdf"), os.path.join(tmp, "x2.pdf")
+make(D1, [["Merhaba dunya.", "Sabit satir."]])
+make(D2, [["Merhaba <script>alert(1)</script> & \"dunya\".", "Sabit satir."]])
+xr = textdiff.report_html(textdiff.compare(PDFDocument(D1), PDFDocument(D2)), "a", "b")
+check("rapor: belge metni kacisli (script/&)", "<script>" not in xr and "&lt;script&gt;" in xr and "&amp;" in xr, xr[xr.find("<table"):][:200])
+ne = textdiff.report_html(textdiff.DiffResult(error="no_text_a"), "a", "b")
+nb = textdiff.report_html(textdiff.DiffResult(error="no_text_b"), "a", "b")
+check("rapor: metinsiz belge uyarisi", "Eski belgede metin katmanı yok" in ne and "Yeni belgede" in nb and "<table" not in ne)
+
 # ---- arayuz
 os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 from PySide6.QtCore import QSettings, QCoreApplication, QEventLoop, QTimer
@@ -190,6 +213,33 @@ pump(until=lambda: w._diff is not None)
 
 # gorsel: tek ekran goruntusu
 w.diff_panel._on_item(next(i for i in w.diff_panel._leaves() if "2500" in i.toolTip(0)))
+# ---- rapor (arayuz)
+from PySide6.QtWidgets import QFileDialog
+dp = w.diff_panel
+check("rapor dugmesi etkin, adlar panelde", dp.btn_report.isEnabled() and dp.names == (os.path.basename(A), os.path.basename(B)), str(dp.names))
+w.diff_panel.chk["add"].setChecked(False)
+rh = dp.write_report(os.path.join(tmp, "rapor"))
+txt = open(rh, encoding="utf-8").read()
+check("rapor: .html eklenir, suzgecten bagimsiz (eklenenler de var)", rh.endswith("rapor.html") and "Eklendi" in txt and os.path.basename(A) in txt)
+w.diff_panel.chk["add"].setChecked(True)
+rp = dp.write_report(os.path.join(tmp, "rapor.pdf"))
+import fitz as _fz
+pdfd = _fz.open(rp)
+check("rapor: PDF acilir, >=1 sayfa, metin var", pdfd.page_count >= 1 and "Sayfa 1" in pdfd[0].get_text() and "2500" in pdfd[0].get_text(), str(pdfd.page_count))
+pdfd.close()
+fake = {}
+orig = QFileDialog.getSaveFileName
+QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: (fake.setdefault("p", os.path.join(tmp, "sec")), "PDF (*.pdf)"))
+got = dp.save_report()
+QFileDialog.getSaveFileName = orig
+check("Raporu kaydet: PDF filtresi -> .pdf", got and got.endswith("sec.pdf") and _fz.open(got).page_count >= 1, str(got))
+QFileDialog.getSaveFileName = staticmethod(lambda *a, **k: ("", ""))
+check("Raporu kaydet: iptal -> None", dp.save_report() is None)
+QFileDialog.getSaveFileName = orig
+dp.set_message("x")
+check("sonuc yokken rapor dugmesi pasif", not dp.btn_report.isEnabled())
+dp.show_result(w._diff)
+
 pump(300)
 shot = os.path.join(tempfile.gettempdir(), "d1_ekran.png")
 w.grab().save(shot)

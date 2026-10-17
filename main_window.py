@@ -4494,6 +4494,8 @@ class MainWindow(QMainWindow):
             return
         self._diff_task = None
         self._diff = res
+        sa, sb = self.pane_left.session, self.pane_right.session
+        self.diff_panel.set_names(*(os.path.basename(x.path) if x is not None and x.path else "" for x in (sa, sb)))
         self.diff_panel.show_result(res)
         self._apply_diff_marks()
 

@@ -7,6 +7,8 @@ yönüne çevrilmiştir; böylece ComparePane sahnesine doğrudan çizilir.
 from __future__ import annotations
 
 import difflib
+import html
+import time
 import unicodedata
 from dataclasses import dataclass, field
 from typing import Callable, Dict, List, Optional, Tuple
@@ -238,3 +240,70 @@ def _word_changes(res: DiffResult, aw: List[Word], bw: List[Word], ignore_case: 
 def snippet(text: str, limit: int = 70) -> str:
     text = " ".join(text.split())
     return text if len(text) <= limit else text[:limit - 1].rstrip() + "…"
+
+
+# ---------------------------------------------------------------------------
+# HTML raporu
+# ---------------------------------------------------------------------------
+_ADD_STYLE = "background-color:#c8f0d4;color:#0e5a2a"
+_DEL_STYLE = "background-color:#f8cfd0;color:#8a1c1c;text-decoration:line-through"
+_KIND = {"add": ("Eklendi", "#1f9d57"), "del": ("Silindi", "#dc3a3a"), "mod": ("Değişti", "#b7791f")}
+
+
+def _mark_words(words_a: List[str], words_b: List[str], ignore_case: bool = False) -> Tuple[str, str]:
+    """Eski/yeni kelime dizilerinde yalnızca farklı kelimeleri vurgulayan iki HTML parçası (kaçışlı)."""
+    ta = [_norm(w, ignore_case) for w in words_a]
+    tb = [_norm(w, ignore_case) for w in words_b]
+    out_a: List[str] = []
+    out_b: List[str] = []
+    for tag, i1, i2, j1, j2 in difflib.SequenceMatcher(None, ta, tb, autojunk=False).get_opcodes():
+        if tag == "equal":
+            out_a.extend(html.escape(w) for w in words_a[i1:i2])
+            out_b.extend(html.escape(w) for w in words_b[j1:j2])
+            continue
+        out_a.extend(f"<span style='{_DEL_STYLE}'>{html.escape(w)}</span>" for w in words_a[i1:i2])
+        out_b.extend(f"<span style='{_ADD_STYLE}'>{html.escape(w)}</span>" for w in words_b[j1:j2])
+    return " ".join(out_a), " ".join(out_b)
+
+
+def _cell(c: Change, ignore_case: bool) -> Tuple[str, str]:
+    wa = [w.text for w in c.a_words]
+    wb = [w.text for w in c.b_words]
+    if c.kind == "add":
+        return "<span style='color:#888'>—</span>", " ".join(f"<span style='{_ADD_STYLE}'>{html.escape(w)}</span>" for w in wb)
+    if c.kind == "del":
+        return " ".join(f"<span style='{_DEL_STYLE}'>{html.escape(w)}</span>" for w in wa), "<span style='color:#888'>—</span>"
+    return _mark_words(wa, wb, ignore_case)
+
+
+def report_html(res: DiffResult, name_a: str = "", name_b: str = "", ignore_case: bool = False) -> str:
+    """Karşılaştırma raporu: özet + sayfa sayfa eski | yeni tablosu. Eklenen yeşil, silinen kırmızı;
+    değişen parçalarda yalnızca farklı kelimeler vurgulanır. Tüm metinler kaçışlanır; satır içi stillerle
+    (QTextDocument/yazıcı da aynı çıktıyı gösterir). `name_a` eski, `name_b` yeni sürümdür."""
+    e = html.escape
+    head = ("<!doctype html><html lang='tr'><head><meta charset='utf-8'><title>Metin karşılaştırma raporu</title></head>"
+            "<body style='font-family:Segoe UI,Arial,sans-serif;font-size:10pt'>"
+            "<h1 style='font-size:18pt'>Metin karşılaştırma raporu</h1>"
+            f"<p><b>Eski:</b> {e(name_a) or '—'}<br><b>Yeni:</b> {e(name_b) or '—'}<br>"
+            f"<span style='color:#666'>Hazırlanma: {time.strftime('%d.%m.%Y %H:%M')}"
+            + (" · büyük/küçük harf yok sayıldı" if ignore_case else "") + "</span></p>")
+    if res.error:
+        side = "Eski" if res.error == "no_text_a" else "Yeni"
+        return head + (f"<p style='color:#b7791f'>{side} belgede metin katmanı yok (taranmış olabilir). "
+                       "Önce OCR ile metni tanıtın.</p></body></html>")
+    body = [f"<p><b>{e(res.summary())}</b> &nbsp;·&nbsp; eski {res.words_a} kelime, yeni {res.words_b} kelime</p>"]
+    if not res.changes:
+        body.append("<p style='color:#1f9d57'>Metinler aynı; fark bulunamadı.</p>")
+    for page, items in res.by_page().items():
+        body.append(f"<h2 style='font-size:13pt;margin-top:18px'>Sayfa {page + 1} "
+                    f"<span style='font-size:10pt;color:#666'>· {len(items)} değişiklik</span></h2>"
+                    "<table width='100%' border='1' cellspacing='0' cellpadding='5' style='border-color:#bbb'>"
+                    "<tr style='background-color:#eee'><th width='11%' align='left'>Tür</th>"
+                    "<th width='44%' align='left'>Eski</th><th width='45%' align='left'>Yeni</th></tr>")
+        for c in items:
+            label, color = _KIND[c.kind]
+            a_html, b_html = _cell(c, ignore_case)
+            body.append(f"<tr><td valign='top'><b style='color:{color}'>{label}</b></td>"
+                        f"<td valign='top'>{a_html}</td><td valign='top'>{b_html}</td></tr>")
+        body.append("</table>")
+    return head + "".join(body) + "</body></html>"

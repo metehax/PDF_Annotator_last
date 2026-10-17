@@ -8,13 +8,15 @@ sinyal yollar; vurgulama ve sayfaya gitme MainWindow'da (ComparePane.goto).
 
 from __future__ import annotations
 
+import os
 import time
 from typing import List, Optional
 
-from PySide6.QtCore import Qt, Signal
-from PySide6.QtGui import QBrush, QColor
+from PySide6.QtCore import QMarginsF, Qt, Signal
+from PySide6.QtGui import QBrush, QColor, QPageLayout, QPageSize, QTextDocument
+from PySide6.QtPrintSupport import QPrinter
 from PySide6.QtWidgets import (
-    QCheckBox, QHBoxLayout, QLabel, QProgressBar, QPushButton, QTreeWidget, QTreeWidgetItem,
+    QCheckBox, QFileDialog, QHBoxLayout, QLabel, QMessageBox, QProgressBar, QPushButton, QTreeWidget, QTreeWidgetItem,
     QVBoxLayout, QWidget,
 )
 
@@ -25,6 +27,19 @@ from ui.icons import icon
 
 _MARK = {"add": "+", "del": "−", "mod": "≠"}
 _COLOR = {"add": "good", "del": "danger", "mod": "warning"}
+
+
+def html_to_pdf(html_text: str, path: str) -> int:
+    """Rapor HTML'ini A4 PDF'e yazar (QTextDocument + QPrinter; ek paket yok). Sayfa sayısını döndürür."""
+    pr = QPrinter(QPrinter.PrinterMode.HighResolution)
+    pr.setOutputFormat(QPrinter.OutputFormat.PdfFormat)
+    pr.setOutputFileName(path)
+    pr.setPageLayout(QPageLayout(QPageSize(QPageSize.PageSizeId.A4), QPageLayout.Orientation.Portrait,
+                                 QMarginsF(15, 15, 15, 15), QPageLayout.Unit.Millimeter))
+    doc = QTextDocument()
+    doc.setHtml(html_text)
+    doc.print_(pr)
+    return doc.pageCount()
 
 
 class CompareDiffPanel(QWidget):
@@ -38,6 +53,7 @@ class CompareDiffPanel(QWidget):
         self._result: Optional[DiffResult] = None
         self._shown: List[Change] = []
         self._last_c, self._last_t = None, 0.0
+        self.names = ("", "")                  # (eski, yeni) belge adları — rapor başlığı için
         v = QVBoxLayout(self)
         v.setContentsMargins(6, 4, 6, 6)
         v.setSpacing(6)
@@ -92,6 +108,11 @@ class CompareDiffPanel(QWidget):
         nav.addWidget(self.btn_next)
         v.addLayout(nav)
         v.addWidget(self.btn_run)
+        self.btn_report = QPushButton(icon("download"), "Raporu kaydet…")
+        self.btn_report.setObjectName("secondary")
+        self.btn_report.setToolTip("Eski | yeni tablosunu HTML ya da PDF olarak kaydeder")
+        self.btn_report.clicked.connect(self.save_report)
+        v.addWidget(self.btn_report)
         self._sync_buttons()
 
     # -- durum ---------------------------------------------------------------
@@ -207,7 +228,44 @@ class CompareDiffPanel(QWidget):
         nxt = leaves[(idx + delta) % len(leaves)]
         self.tree.setCurrentItem(nxt)               # currentItemChanged → changeActivated
 
+    # -- rapor ---------------------------------------------------------------
+    def set_names(self, name_a: str, name_b: str):
+        self.names = (name_a, name_b)
+
+    def report_html(self) -> str:
+        """Son sonucun raporu (süzgeçten bağımsız: tüm değişiklikler)."""
+        return textdiff.report_html(self._result, self.names[0], self.names[1], self.ignore_case)
+
+    def write_report(self, path: str) -> str:
+        """`.pdf` uzantısında PDF, değilse HTML yazar; yazılan yolu döndürür."""
+        text = self.report_html()
+        if path.lower().endswith(".pdf"):
+            html_to_pdf(text, path)
+        else:
+            if not path.lower().endswith((".html", ".htm")):
+                path += ".html"
+            with open(path, "w", encoding="utf-8") as f:
+                f.write(text)
+        return path
+
+    def save_report(self):
+        if self._result is None:
+            return None
+        base = os.path.splitext(self.names[1] or "karsilastirma")[0] + "_fark"
+        path, flt = QFileDialog.getSaveFileName(self, "Karşılaştırma raporunu kaydet", base + ".html",
+                                                "HTML (*.html);;PDF (*.pdf)")
+        if not path:
+            return None
+        if "PDF" in flt and not path.lower().endswith(".pdf"):
+            path = os.path.splitext(path)[0] + ".pdf"
+        try:
+            return self.write_report(path)
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Rapor kaydedilemedi:\n{ex}")
+            return None
+
     def _sync_buttons(self):
+        self.btn_report.setEnabled(self._result is not None and not self._result.error)
         has = bool(self._shown)
         self.btn_prev.setEnabled(has)
         self.btn_next.setEnabled(has)
