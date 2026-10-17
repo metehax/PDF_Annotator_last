@@ -43,7 +43,7 @@ from ui import theme as ui_theme
 from ui.icons import icon
 from models import (
     Annotation, BlurAnnotation, HighlightAnnotation, ImageAnnotation, InkAnnotation,
-    LineAnnotation, NoteAnnotation, RedactionAnnotation, ShapeAnnotation,
+    LineAnnotation, NoteAnnotation, RedactionAnnotation, RedactItem, ShapeAnnotation,
     ToolState, arrow_wing_points, catmull_rom_to_beziers,
 )
 
@@ -820,9 +820,7 @@ class PDFView(QGraphicsView):
             self._add_temp(item)
 
         elif tool == "redact":
-            item = QGraphicsRectItem()
-            item.setBrush(QBrush(QColor(self.state.redact_color)))
-            item.setPen(QPen(QColor("#ff4d4d"), 1.5, Qt.PenStyle.DashLine))
+            item = RedactItem(QRectF(), self.state.redact_color)      # çizerken de yumuşak görünüm
             self._add_temp(item)
 
         elif tool == "blur":
@@ -994,7 +992,7 @@ class PDFView(QGraphicsView):
         elif tool == "redact":
             rect = QRectF(self._start, pt).normalized()
             if rect.width() > 2 and rect.height() > 2:
-                ann = RedactionAnnotation(rect, self.state.redact_color)
+                ann = RedactionAnnotation(rect, self.state.redact_color, label=self.state.redact_label)
         elif tool == "blur":
             rect = QRectF(self._start, pt).normalized()
             if rect.width() > 4 and rect.height() > 4:

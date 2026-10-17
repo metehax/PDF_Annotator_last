@@ -411,3 +411,14 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   yoluyla açılır. Kaydetme ve normal kapanış taslağı siler. **Parolalı belgeler düz metin yedeklenmesin diye yedeklenmez.**
 * **Genel:** tema (sistem/açık/koyu), son kullanılan klasörü hatırlama (Aç penceresi).
 * Çalışma klasörünü `PDF_ANNOTATOR_WORKSPACE` ortam değişkeniyle de belirleyebilirsiniz (ayarı geçersiz kılar).
+
+## Yeni: Daha nazik sansür görünümü
+* **Düzenlerken yumuşak:** sansür kutusu yarı saydam (~%55) dolgu, ince açık kenar ve yuvarlatılmış köşeyle görünür; altındaki metin
+  hâlâ seçilip kontrol edilebilir. **Görünüm → Sansürün nihai görünümü** (ya da araç çubuğundaki kutu) ekranda da çıktıdaki gibi
+  tam dolgu/kenarsız gösterir. Bu yalnız ekran görünümüdür: **dışa aktarılan PDF her zaman dikdörtgen + tam dolgudur** ve kaydedince
+  altındaki metin ve resim PDF'ten **kalıcı silinir** (sansür aracı ilk seçildiğinde ve araç ipucunda hatırlatılır).
+* **Dolgu ve etiket:** özellik çubuğunda Siyah / Koyu gri / Beyaz hazırları (+ özel renk) ve isteğe bağlı **etiket metni**
+  ("GİZLİ", "[KARARTILDI]" ya da kendi metniniz; Türkçe harfler desteklenir). Etiket kutunun ortasına, dolguya göre beyaz ya da siyah
+  yazılır; kutuya sığmıyorsa yazılmaz (silme yine olur). KVKK penceresi aynı seçenekleri kullanır.
+* **Eski projeler** (etiket alanı olmayan JSON) olduğu gibi açılır.
+* **Düzeltme:** döndürülmüş sayfalarda sansür kutusu artık görünen konuma göre uygulanır (önceden altındaki metin silinmeyebiliyordu).

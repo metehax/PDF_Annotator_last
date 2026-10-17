@@ -26,6 +26,7 @@ import pii
 from models import AddAnnotationCommand, RedactionAnnotation
 from ui.ocrdialog import _OcrTask
 from ui.icons import icon
+from ui.redactopts import RedactOptions
 
 _HIT_ROLE = Qt.ItemDataRole.UserRole + 10
 
@@ -109,6 +110,9 @@ class KvkkDialog(QDialog):
         self.summary = QLabel("Taramak için 'Tara'ya basın.")
         self.summary.setObjectName("hint")
         v.addWidget(self.summary)
+
+        self.redact_opts = RedactOptions(self._main)            # dolgu rengi + etiket: sansür aracıyla ortak
+        v.addWidget(self.redact_opts)
 
         bottom = QHBoxLayout()
         self.btn_all = QPushButton("Tümünü seç")
@@ -291,11 +295,12 @@ class KvkkDialog(QDialog):
         if not hits or s not in self._main.sessions:
             return
         color = self._main.state.redact_color
+        label = self._main.state.redact_label
         s.undo_stack.beginMacro(f"{len(hits)} kişisel veriyi karart")
         for h in hits:
             x0, y0, x1, y1 = h.rect
             rect = QRectF(x0 - 1.5, y0 - 1.0, (x1 - x0) + 3.0, (y1 - y0) + 2.0)
-            s.undo_stack.push(AddAnnotationCommand(s, h.page, RedactionAnnotation(rect, color),
+            s.undo_stack.push(AddAnnotationCommand(s, h.page, RedactionAnnotation(rect, color, label=label),
                                                    on_change=self._main._on_session_change,
                                                    label="Karart"))
         s.undo_stack.endMacro()

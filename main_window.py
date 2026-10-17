@@ -17,13 +17,13 @@ import sys
 from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QPointF, QSettings, Qt, QThreadPool, QTimer, QUrl
-from PySide6.QtGui import QDesktopServices, QKeySequence, QUndoGroup
+from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QMainWindow, QMenu, QMessageBox, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
 )
 
-from models import DocumentSession, ToolState, ZOrderCommand
+from models import DocumentSession, RedactionAnnotation, ToolState, ZOrderCommand
 from pdf_engine import IMAGE_EXTS, PasswordRequired, PDFDocument, is_image_path, resolve_font_ctx
 from fonts import register_app_fonts
 from ui import theme as ui_theme
@@ -79,6 +79,7 @@ class MainWindow(
         self.night_mode = False
         self.settings = QSettings("PDFAnnotator", "PDFAnnotator")
         workspace.configure(self.settings)
+        RedactionAnnotation.final_view = str(self.settings.value("redactFinal", "false")).lower() == "true"
         saved_theme = self.settings.value("theme", "")
         self.dark_mode = (saved_theme == "dark") if saved_theme in ("dark", "light") \
             else ui_theme.system_prefers_dark()
@@ -648,10 +649,41 @@ class MainWindow(
         self._place_floating()
         if tool == "number":
             self._refresh_number_label()
+        if tool == "redact":
+            self._redact_first_use_hint()
         cursor = (Qt.CursorShape.IBeamCursor if tool in ("text", "edit", "number", "note")
                   else Qt.CursorShape.CrossCursor if tool != "select"
                   else Qt.CursorShape.ArrowCursor)
         self.view.viewport().setCursor(cursor)
+
+    def _set_redact_color(self, color):
+        """Sansür dolgu rengini ayarlar (hazır düğmeler / KVKK penceresi) ve renk düğmelerini günceller."""
+        self.state.redact_color = QColor(color)
+        for btn in self._color_buttons_by_attr.get("redact_color", []):
+            btn.setStyleSheet(f"background:{self.state.redact_color.name()};")
+
+    def set_redact_final_view(self, on: bool):
+        """Sansürün ekrandaki "nihai görünümü" (tam dolgu, kenarsız). Yalnız görünümdür; çıktı her zaman tam dolgu."""
+        on = bool(on)
+        RedactionAnnotation.final_view = on
+        self.settings.setValue("redactFinal", on)
+        for w in (getattr(self, "act_redact_final", None), getattr(self, "chk_redact_final", None)):
+            if w is not None and w.isChecked() != on:
+                w.blockSignals(True)
+                w.setChecked(on)
+                w.blockSignals(False)
+        self.view.scene().update()
+        for v in (self.view, self.pane_left, self.pane_right):
+            vp = getattr(v, "viewport", None)
+            if vp:
+                vp().update()
+
+    def _redact_first_use_hint(self):
+        """Sansür aracı ilk seçildiğinde bir kez uyarır."""
+        if str(self.settings.value("redactHintShown", "false")).lower() == "true":
+            return
+        self.settings.setValue("redactHintShown", True)
+        self.toasts.show("Kaydedince altındaki metin ve resim PDF'ten KALICI silinir.", "warning", timeout_ms=6000)
 
     def _pick_color(self, attr):
         current = getattr(self.state, attr)

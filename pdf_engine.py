@@ -571,6 +571,8 @@ class PDFDocument:
                 r.apply_to_page(page, font_ctx)
             if redactions:
                 page.apply_redactions()
+                for r in redactions:                 # etiket: altındaki içerik silindikten sonra yazılır
+                    r.draw_label(page, font_ctx)
             if blurs:
                 # önce hepsinin bulanık görüntüsü hazırlanır, sonra alttaki içerik silinir
                 for b in blurs:

@@ -21,6 +21,7 @@ from PySide6.QtWidgets import (
 
 from views import ComparePane, PDFView
 from fonts import FONT_FAMILIES
+from models import RedactionAnnotation
 from ui import theme as ui_theme
 from ui.icons import icon, pixmap as icon_pixmap
 from ui.overlays import FloatingBar
@@ -29,6 +30,7 @@ from ui.compare import CompareDiffPanel
 import textdiff
 import forms
 from ui.formui import FormsPanel
+from ui.redactopts import RedactOptions
 from ui.sidepanel import SidePanel
 from ui.widgets import ThumbnailDelegate
 from ui.ocrdialog import _OcrTask
@@ -241,6 +243,9 @@ class BuildMixin:
         A(m_view, "grid", "Kenar paneli", self._toggle_side_panel, "Ctrl+B", needs_doc=False)
         A(m_view, "comment", "Yorumlar paneli", self._show_comments_panel, "Ctrl+Shift+M")
         self.act_night = A(m_view, "contrast", "Gece modu", self.toggle_night_mode, checkable=True)
+        self.act_redact_final = A(m_view, "redact", "Sansürün nihai görünümü", self.set_redact_final_view, checkable=True,
+                                  needs_doc=False)
+        self.act_redact_final.setChecked(RedactionAnnotation.final_view)
         self.act_compare = A(m_view, "compare", "Karşılaştırma modu", self.toggle_compare_mode,
                              checkable=True)
         A(m_view, "compare", "Metin farkını göster (iki sürümü karşılaştır)", self.compare_documents)
@@ -843,11 +848,17 @@ class BuildMixin:
         ))
         self._tool_pages["highlight"] = idx; idx += 1
 
+        self.redact_opts = RedactOptions(self)
+        self.chk_redact_final = QCheckBox("Nihai görünüm (tam dolgu, kenarsız)")
+        self.chk_redact_final.setToolTip("Yalnız ekrandaki görünümü değiştirir; dışa aktarılan PDF her zaman tam dolgudur.")
+        self.chk_redact_final.setChecked(RedactionAnnotation.final_view)
+        self.chk_redact_final.toggled.connect(self.set_redact_final_view)
         self.prop_stack.addWidget(page(
-            self._color_row("Kutu Rengi", "redact_color"),
-            self._hint("Dışa aktarırken kutunun altındaki metin/görsel "
-                      "PDF'ten KALICI olarak silinir. Kırmızı kesikli çerçeve "
-                      "ile gösterilir. Dikkatli çizin.", warn=True),
+            self.redact_opts,
+            self._color_row("Özel renk", "redact_color"),
+            self.chk_redact_final,
+            self._hint("Kaydedince altındaki metin ve resim PDF'ten KALICI silinir. Düzenlerken kutu "
+                       "yumuşak (yarı saydam) görünür; çıktıda tam dolgudur. Dikkatli çizin.", warn=True),
         ))
         self._tool_pages["redact"] = idx; idx += 1
 

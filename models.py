@@ -33,7 +33,7 @@ import pymupdf as fitz
 
 from PySide6.QtCore import QPointF, QRectF, Qt
 from PySide6.QtGui import (
-    QBrush, QColor, QFont, QImage, QPainterPath, QPen, QPixmap, QTransform,
+    QBrush, QColor, QFont, QImage, QPainter, QPainterPath, QPen, QPixmap, QTransform,
     QUndoCommand, QUndoStack,
 )
 from PySide6.QtWidgets import (
@@ -482,30 +482,109 @@ class HighlightAnnotation(Annotation):
         return obj
 
 
-@_register("redaction")
-class RedactionAnnotation(Annotation):
-    """Gerçek sansürleme: dışa aktarırken altındaki içeriği kalıcı siler."""
+class RedactItem(QGraphicsRectItem):
+    """Sansür kutusunun sahne öğesi. Düzenlerken "yumuşak": hafif saydam dolgu, ince açık kenar, yuvarlatılmış köşe
+    (yalnız ekranda). `RedactionAnnotation.final_view` açıksa çıktıdaki gibi: tam dolgu, kenarsız, dik köşe.
+    Görünüm her çizimde bayraktan okunur (anahtar çevrilince yeniden oluşturmak gerekmez). Çıktı etkilenmez."""
+    SOFT_ALPHA = 140            # ~%55
+    RADIUS = 3.0
 
     def __init__(self, rect: QRectF, fill_color: QColor, quiet: bool = False):
+        super().__init__(rect)
+        self.fill_color = QColor(fill_color)
+        self.quiet = bool(quiet)
+
+    def appearance(self) -> tuple:
+        """(dolgu alfa 0-255, kenar var mı, köşe yarıçapı) — geçerli bayrağa göre."""
+        if self.quiet or RedactionAnnotation.final_view:       # metin düzenleme silmesi her zaman düz/tam dolgu
+            return 255, False, 0.0
+        return self.SOFT_ALPHA, True, self.RADIUS
+
+    def paint(self, painter, option, widget=None):
+        alpha, border, radius = self.appearance()
+        fill = QColor(self.fill_color)
+        fill.setAlpha(min(alpha, fill.alpha()))
+        painter.setBrush(QBrush(fill))
+        if border:
+            try:
+                from ui import theme
+                edge = theme.qcolor("accent")
+            except Exception:
+                edge = QColor("#7aa2ff")
+            edge.setAlpha(200)
+            pen = QPen(edge, 1.0)
+            pen.setCosmetic(True)
+            painter.setPen(pen)
+        else:
+            painter.setPen(QPen(Qt.PenStyle.NoPen))
+        painter.setRenderHint(QPainter.RenderHint.Antialiasing, radius > 0)
+        r = self.rect()
+        if radius > 0:
+            painter.drawRoundedRect(r, radius, radius)
+        else:
+            painter.drawRect(r)
+
+
+@_register("redaction")
+class RedactionAnnotation(Annotation):
+    """Gerçek sansürleme: dışa aktarırken altındaki içeriği kalıcı siler. Çıktıda dikdörtgen + tam dolgu
+    (isteğe bağlı ortalanmış etiket metni); ekrandaki yumuşak görünüm (`RedactItem`) yalnız düzenleme içindir."""
+
+    final_view = False          # True: ekranda da çıktıdaki gibi (tam dolgu, kenarsız). Tüm sansürleri etkiler.
+
+    def __init__(self, rect: QRectF, fill_color: QColor, quiet: bool = False, label: str = ""):
         super().__init__()
         self.rect = QRectF(rect).normalized()
         self.fill_color = QColor(fill_color)
-        # quiet=True: metin düzenleme aracının "orijinali sil" adımı (kırmızı
-        # kesikli kenarlık gösterilmez, katman adı farklıdır).
+        # quiet=True: metin düzenleme aracının "orijinali sil" adımı (kenarlık gösterilmez, katman adı farklıdır).
         self.quiet = bool(quiet)
+        self.label = str(label or "")           # kutunun üstüne yazılan metin ("GİZLİ", "[KARARTILDI]"…)
 
     def create_item(self) -> QGraphicsItem:
-        item = QGraphicsRectItem(self.rect)
-        item.setBrush(QBrush(QColor(self.fill_color)))
-        if self.quiet:
-            item.setPen(QPen(Qt.PenStyle.NoPen))
-        else:
-            item.setPen(QPen(QColor("#ff4d4d"), 1.5, Qt.PenStyle.DashLine))
-        return item
+        return RedactItem(self.rect, self.fill_color, self.quiet)
 
     def apply_to_page(self, page, font_ctx) -> None:
         r = fitz.Rect(self.rect.left(), self.rect.top(), self.rect.right(), self.rect.bottom())
+        if page.rotation:
+            # redact döndürülmemiş sayfa koordinatı ister (get_pixmap/ekran ise görünen): BlurAnnotation ile aynı dönüşüm
+            un = fitz.Rect(r) * page.derotation_matrix
+            un.normalize()
+            pos = page.cropbox_position
+            r = fitz.Rect(un.x0 + pos.x, un.y0 + pos.y, un.x1 + pos.x, un.y1 + pos.y)
         page.add_redact_annot(r, fill=qcolor_to_fitz(self.fill_color) or (0, 0, 0))
+
+    def draw_label(self, page, font_ctx) -> None:
+        """Etiket metnini kutunun ortasına yazar. `apply_redactions()`'tan SONRA çağrılır (altındaki içerik silindikten
+        sonra); renk dolguya göre otomatik (koyu zemin → beyaz, açık zemin → siyah); kutuya sığacak punto seçilir."""
+        text = self.label.strip()
+        if not text or self.quiet:
+            return
+        r = fitz.Rect(self.rect.left(), self.rect.top(), self.rect.right(), self.rect.bottom())
+        if r.width < 8 or r.height < 6:
+            return
+        c = self.fill_color
+        lum = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255.0
+        color = (1, 1, 1) if lum < 0.5 else (0, 0, 0)
+        fname, ffile = (font_ctx[0], font_ctx[1]) if font_ctx else ("helv", None)
+        try:
+            font = fitz.Font(fontfile=ffile) if ffile else fitz.Font("helv")
+        except Exception:
+            font, fname, ffile = fitz.Font("helv"), "helv", None
+        size = min(14.0, r.height * 0.6)
+        while size > 4.0 and font.text_length(text, fontsize=size) > r.width - 4:
+            size -= 0.5
+        if font.text_length(text, fontsize=size) > r.width - 2:
+            return                                  # sığmıyor: okunaksız etiket yazma
+        box = fitz.Rect(r.x0, r.y0 + max(0.0, (r.height - size * 1.25) / 2), r.x1, r.y1)
+        kw = dict(fontsize=size, color=color, align=1)
+        if page.rotation:
+            # insert_textbox döndürülmemiş koordinat ister; metin görünen yönde dik dursun diye sayfa açısı kadar döndürülür
+            un = fitz.Rect(box) * page.derotation_matrix
+            un.normalize()
+            pos = page.cropbox_position
+            box = fitz.Rect(un.x0 + pos.x, un.y0 + pos.y, un.x1 + pos.x, un.y1 + pos.y)
+            kw["rotate"] = int(page.rotation)
+        page.insert_textbox(box, text, fontname=fname, **({"fontfile": ffile} if ffile else {}), **kw)
 
     def translate(self, dx, dy) -> None:
         self.rect.translate(dx, dy)
@@ -519,12 +598,13 @@ class RedactionAnnotation(Annotation):
     def to_dict(self) -> dict:
         return dict(type=self.TYPE, uid=self.uid,
                     rect=[self.rect.x(), self.rect.y(), self.rect.width(), self.rect.height()],
-                    fill_color=color_to_hex_alpha(self.fill_color), quiet=self.quiet)
+                    fill_color=color_to_hex_alpha(self.fill_color), quiet=self.quiet, label=self.label)
 
     @classmethod
     def _from_dict(cls, d):
         x, y, w, h = d["rect"]
-        obj = cls(QRectF(x, y, w, h), color_from_hex_alpha(d["fill_color"]), d.get("quiet", False))
+        obj = cls(QRectF(x, y, w, h), color_from_hex_alpha(d["fill_color"]), d.get("quiet", False),
+                  d.get("label", ""))             # "label" eski projelerde yok: geriye uyumlu
         obj.uid = d.get("uid", obj.uid)
         return obj
 
@@ -893,6 +973,7 @@ class ToolState:
         self.text_color = QColor("#1d3557")
         self.hl_color = QColor("#fff176")
         self.redact_color = QColor("#000000")
+        self.redact_label = ""            # sansür kutusuna yazılacak etiket (boş = yok)
         self.number_color = QColor("#e63946")
         self.blur_strength = 10.0
         self.blur_mode = "blur"          # "blur" | "pixel"

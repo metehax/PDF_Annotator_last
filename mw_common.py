@@ -28,7 +28,7 @@ TOOLS = [
     ("rect", "Dörtgen", "rect", "Dörtgen çiz"),
     ("oval", "Oval", "oval", "Oval çiz"),
     None,
-    ("redact", "Gizle (Sansür)", "redact", "Altındaki içeriği kalıcı olarak sil"),
+    ("redact", "Gizle (Sansür)", "redact", "Kaydedince altındaki metin ve resim PDF'ten KALICI silinir"),
     ("blur", "Bulanıklaştır", "blur", "Bir alanı bulanıklaştır ya da mozaikle (kalıcı)"),
     ("image", "Resim", "image", "Sayfaya resim yerleştir"),
     ("number", "Numarala", "number", "Sıra numarası koy"),
