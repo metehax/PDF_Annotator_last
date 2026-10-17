@@ -51,6 +51,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `digisign.py`    | Dijital imza (pyhanko): .pfx ile imzalama, doğrulama, sonradan değişiklik denetimi |
 | `workflow.py`   | **Görsel iş akışı çekirdeği:** adım türleri (OCR, döndür, filigran, sayfa numarası, KVKK, sıkıştır, parola, kaydet), şablon kütüphanesi, çalıştırıcı (tek dosya / toplu), sonuç raporu |
 | `ui/workflow.py` | İş akışı penceresi: adım paleti, sürükleyerek sıralanan zincir, ayar paneli, şablon, hedef seçimi, ilerleme/durdurma, sonuç tablosu |
+| `textdiff.py`   | **Metin farkı çekirdeği:** iki belgenin metnini satır + kelime düzeyinde karşılaştırır (eklenen / silinen / değişen, sayfa konumlarıyla) |
+| `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
 | `ui/stamps.py`   | Damga çizici, hazır damgalar, kendi damgalarınız (logolu) ve kütüphane penceresi |
 | `ui/widgets.py`  | Tema uyumlu parçalar (ör. küçük resim çizici) |
 | `main_window.py` | `MainWindow`: üst araç çubuğu, **QTabBar** sekmeli belge yönetimi, **QDockWidget** paneller (sol: Küçük Resimler/İçindekiler/Ara — sağ: Özellikler/Katmanlar), yakınlaştırma/durum çubuğu, **QUndoStack/QUndoGroup**, filigran & resim ekleme diyalogları |
@@ -305,3 +307,18 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   değişimi, süre ve ayrıntı görünür; çift tıklamak sonucu açar, **Raporu kaydet** CSV/TXT yazar.
 * **Kaydet adımı:** aynı klasöre ada ek getirerek (varsayılan `_islendi`), seçilen klasöre (alt klasör yapısı korunabilir) ya da
   özgün dosyanın üstüne (`.yedek.pdf` kopyasıyla). Açık belge için üstüne yazma kapalıdır; güvenli yola düşer.
+
+## Yeni: Metin farkı (iki sürümü karşılaştırma)
+
+**Görünüm → Metin farkını göster** (ya da karşılaştırma modunu açmak) iki belgenin metnini otomatik karşılaştırır.
+
+* **Vurgu:** sol panelde (eski sürüm) silinen/değişen metin **kırmızı**, sağ panelde (yeni sürüm) eklenen/değişen metin **yeşil**
+  boyanır. Konumlar sayfanın görünen yönüne göre hesaplanır; döndürülmüş sayfalarda da doğru oturur.
+* **Değişiklikler paneli:** sağda, sayfa sayfa gruplanmış liste (`+` eklenen, `−` silinen, `≠` değişen: eski → yeni).
+  Eklenen / Silinen / Değişen süzgeçleri vardır; süzgeç vurguları da günceller.
+* **Listeden git:** bir satıra tıklamak iki paneli de ilgili sayfaya götürür ve değişikliği mavi halkayla işaretler.
+  Eklemede eski belgede, silmede yeni belgede karşılık gelen nokta gösterilir. **F8 / Shift+F8** sonraki / önceki değişikliğe geçer.
+* **Nasıl çalışır:** önce satır, sonra değişen satırların içinde kelime düzeyinde fark alınır (arka planda, arayüz donmaz).
+  Sol/sağ belge ya da "Büyük/küçük harfi yoksay" değişince otomatik yeniden hesaplanır.
+* **Sınırlar:** yalnızca metin katmanı karşılaştırılır; taranmış (metinsiz) belge için önce OCR gerekir (panel uyarır).
+  Görsel/çizim farkı ve henüz kaydedilmemiş işaretler karşılaştırmaya girmez.

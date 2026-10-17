@@ -1202,6 +1202,8 @@ class ComparePaneView(QGraphicsView):
 
 
 class ComparePane(QWidget):
+    sessionChanged = Signal()
+
     def __init__(self, sessions_provider: Callable[[], list], state_provider: Callable[[], ToolState],
                  number_callback: Callable[["ComparePane", QPointF], None],
                  night_mode_provider: Optional[Callable[[], bool]] = None):
@@ -1210,6 +1212,9 @@ class ComparePane(QWidget):
         self.night_mode_provider = night_mode_provider or (lambda: False)
         self.session = None
         self.page = 0
+        # Metin farkı vurguları: sayfa -> [(x0, y0, x1, y1, "add"|"del")]
+        self._marks: Dict[int, list] = {}
+        self._focus = None                   # (sayfa, (x0, y0, x1, y1)) — vurgulu değişiklik
 
         v = QVBoxLayout(self)
         v.setContentsMargins(4, 4, 4, 4)
@@ -1273,6 +1278,44 @@ class ComparePane(QWidget):
         else:
             self.session = None
         self._render(fit=True)
+        self.sessionChanged.emit()
+
+    # -- metin farkı vurguları -------------------------------------------------
+    def set_marks(self, marks: Dict[int, list]):
+        self._marks = marks
+        self._focus = None
+        self._render()
+
+    def goto(self, page: int, rect):
+        """Sayfaya geçer, `rect` (sayfa pt) bölgesini vurgulayıp görünür kılar."""
+        if not self.session or not 0 <= page < self.session.pdf.page_count:
+            return
+        changed = page != self.page
+        self.page = page
+        self._focus = (page, tuple(rect))
+        self._render(fit=changed)
+        self.gview.ensureVisible(QRectF(rect[0], rect[1], rect[2] - rect[0], rect[3] - rect[1]),
+                                 80, 80)
+
+    def _draw_marks(self):
+        pad = 1.0
+        for x0, y0, x1, y1, kind in self._marks.get(self.page, []):
+            color = ui_theme.qcolor("good" if kind == "add" else "danger")
+            fill = QColor(color)
+            fill.setAlpha(70)
+            it = QGraphicsRectItem(QRectF(x0 - pad, y0 - pad, x1 - x0 + 2 * pad, y1 - y0 + 2 * pad))
+            it.setBrush(QBrush(fill))
+            it.setPen(QPen(Qt.PenStyle.NoPen))
+            it.setZValue(5)
+            self.scene.addItem(it)
+        if self._focus and self._focus[0] == self.page:
+            x0, y0, x1, y1 = self._focus[1]
+            ring = QGraphicsRectItem(QRectF(x0 - 3, y0 - 3, x1 - x0 + 6, y1 - y0 + 6))
+            pen = QPen(ui_theme.qcolor("accent"), 2)
+            pen.setCosmetic(True)
+            ring.setPen(pen)
+            ring.setZValue(6)
+            self.scene.addItem(ring)
 
     def _change_page(self, delta):
         if not self.session:
@@ -1299,6 +1342,7 @@ class ComparePane(QWidget):
             gi = ann.create_item()
             gi.setFlags(QGraphicsItem.GraphicsItemFlag(0))   # salt okunur önizleme
             self.scene.addItem(gi)
+        self._draw_marks()
         self.lbl.setText(f"{self.page + 1} / {self.session.pdf.page_count}")
         if fit:
             self.gview.fitInView(self.scene.sceneRect(), Qt.AspectRatioMode.KeepAspectRatio)

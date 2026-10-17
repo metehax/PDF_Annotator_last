@@ -16,10 +16,11 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 | `forms.py` | AcroForm: `list_fields`, `set_value/apply_values/snapshot_values`, `reset_values`, `recalculate`, `add_field/field_spec/delete_field` |
 | `digisign.py` | pyhanko: `sign_pdf` (artımlı; alan/yeni kutu/görünmez), `verify_pdf` → `SigReport`, `create_self_signed` |
 | `workflow.py` | Görsel iş akışı çekirdeği (arayüzsüz): `STEP_TYPES` (ocr/rotate/watermark/headfoot/kvkk/compress/password/save), `Workflow`/`Step`, `WorkflowLibrary` (QSettings'te JSON şablon + hazır şablonlar), `run_file`/`run_batch`/`collect_files`, `BatchReport` |
+| `textdiff.py` | Metin farkı çekirdeği (arayüzsüz): `compare(pdf_a, pdf_b, ignore_case, check, progress)` → `DiffResult` (`Change`: kind add/del/mod, `a_rects`/`b_rects` sayfa pt + görünen yön, `focus_a/focus_b`, `page`), `extract_lines` |
 | `ocr.py`, `fonts.py`, `gizmo.py` | OCR (Tesseract, `tessdata/`), yazı tipleri, boyutlandırma kulpları |
 | `ui/theme.py` | Renk belirteçleri (`current()`, `qcolor()`), QSS — yeni objectName stillerini buraya ekle |
 | `ui/icons.py` | Kendi SVG ikon seti: `icon(name, role)`; yeni ikon = `_PATHS`'e 24×24 çizgi SVG |
-| `ui/*.py` | overlays, sidepanel, welcome, toast, palette, kvkk, stamps, docdialogs, widgets, pagetools (üstbilgi/Bates + sayfa kırpma), comments (Yorumlar paneli + `ask_note_text`), signatures (`SignatureLibrary`, imza/dijital imza/rapor pencereleri), formui (Formlar paneli, `FormFieldDialog`, satır içi `FormFieldEditor`), workflow (`WorkflowDialog`: palet + sürüklenebilir zincir + `ParamForm` + şablon + hedef + ilerleme/rapor) |
+| `ui/*.py` | overlays, sidepanel, welcome, toast, palette, kvkk, stamps, docdialogs, widgets, pagetools (üstbilgi/Bates + sayfa kırpma), comments (Yorumlar paneli + `ask_note_text`), signatures (`SignatureLibrary`, imza/dijital imza/rapor pencereleri), formui (Formlar paneli, `FormFieldDialog`, satır içi `FormFieldEditor`), workflow (`WorkflowDialog`: palet + sürüklenebilir zincir + `ParamForm` + şablon + hedef + ilerleme/rapor), compare (`CompareDiffPanel`: sayfa sayfa değişiklik listesi + süzgeç + önceki/sonraki) |
 
 ## Kurallar
 - Yeni eylem: `_build_menus()` içinde `A(menu, ikon, "Metin", slot, "Kısayol")` — komut paletine (Ctrl+K) otomatik girer.
@@ -46,6 +47,7 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 - İş akışı çıktısı geçici dosya + `os.replace`; Windows'ta açık dosyanın üstüne taşınmaz → özgün belge `save` öncesi kapatılır. Açık belge `Source(protect_original=True)` ile işlenir (işaretli kopya bayt olarak), üstüne yazma kapalıdır.
 - Parola adımında `ask=True` iken parola şablona/ayara yazılmaz; `run_batch(..., overrides={'user_password': ...})` ile gelir. Testte `dlg.ask_passwords`, `dlg.ask_name` sahtelenir (exec bloklar).
 - Görünür bir pencereye sonradan eklenen widget'a `show()` çağır (aksi halde panel boş kalır; `ParamForm` böyle yakalandı).
+- Metin farkı: `MainWindow._run_diff` `_OcrTask` ile arka planda `textdiff.compare` çalıştırır; `_diff_token` bayat sonucu eler, sol/sağ combo ya da "harf yoksay" değişince `_schedule_diff` (350 ms) yeniden hesaplar. Vurgu `ComparePane.set_marks({sayfa: [(x0,y0,x1,y1,"add"|"del")]})`, listeden gitme `ComparePane.goto(sayfa, rect)` (odak halkası). Konumlar `page.rotation_matrix` ile görünen yöne çevrilir; birleştirme yalnızca aynı satırdaki kelimeleri kapsar. Testte iki belge `w.open_paths([a, b])` + `w.compare_documents()`, sonucu `w._diff is not None` ile bekle.
 - Heredoc ile `'''` içeren betik yazma (araç ayrıştırması bozuluyor): betiği Write ile dosyaya yaz, sonra çalıştır.
 
 ## Test
@@ -60,5 +62,6 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 B tamam (sayfa no/üstbilgi/Bates, sayfa kırpma, bulanıklaştırma, yapışkan not + yorumlar) ·
 C1 tamam (form doldurma/sıfırlama/oluşturma, hesaplanan alan, Ctrl+P yazdırma) ·
 C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğrulama) · E tamam (görsel iş akışı: adım zinciri + şablon + açık belge/dosyalar/klasör, ilerleme/durdurma/rapor) ·
-F: QR ile telefondan dosya alma (yerel ağ, segno) · D: sürüm karşılaştırma, Word/Excel (pdf2docx, openpyxl),
+D1 tamam (iki sürümün metin farkı: yeşil/kırmızı vurgu, sayfa sayfa liste, listeden git) ·
+F: QR ile telefondan dosya alma (yerel ağ, segno) · D: Word/Excel (pdf2docx, openpyxl),
 erişilebilirlik denetimi. Onaylı yeni paketler: segno, pdf2docx, openpyxl (`requirements.txt`'e ekle).
