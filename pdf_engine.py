@@ -717,6 +717,94 @@ def apply_watermark_to_document(doc: "fitz.Document", config: WatermarkConfig, f
 
 
 # ---------------------------------------------------------------------------
+# Düzleştirme (işaret / yorum / form alanlarını sayfa içeriğine gömme)
+# ---------------------------------------------------------------------------
+def _bake_fallback(doc: "fitz.Document", dpi: int = 200) -> int:
+    """`Document.bake` yoksa: açıklama/alan içeren sayfaları görüntüsüyle (görünüm korunur) değiştirir. Sayı döner."""
+    n = 0
+    for i in range(doc.page_count):
+        page = doc[i]
+        if not (list(page.annots() or []) or list(page.widgets() or [])):
+            continue
+        r = page.rect
+        pix = page.get_pixmap(dpi=dpi, alpha=False)
+        doc.insert_page(i, width=r.width, height=r.height)
+        doc[i].insert_image(doc[i].rect, pixmap=pix)
+        doc.delete_page(i + 1)
+        n += 1
+    return n
+
+
+def flatten_pdf(data: bytes, out_path: str, as_images: bool = False, dpi: int = 200, jpeg_quality: int = 85,
+                security=None, compress: Optional[str] = None, progress=None, cancelled=None) -> dict:
+    """PDF baytlarındaki açıklamaları (yorum, vurgu, not…) ve form alanlarını sayfa içeriğine gömer (artık nesne değil,
+    yalnız görünüm kalır); `as_images=True` ise her sayfayı `dpi`'de resme çevirir (metin kopyalanamaz/aranamaz).
+    Uygulamanın kendi işaretleri `_annotated_copy` ile zaten içeriğe işlenmiş olarak gelir. Çıktı geçici dosya +
+    `os.replace` ile yazılır; iptalde `convert.Cancelled` fırlar ve dosya kalmaz. Özet sözlüğü döner."""
+    from convert import Cancelled
+    import docsec
+
+    def check():
+        if cancelled is not None and cancelled():
+            raise Cancelled()
+
+    info = {"pages": 0, "annots": 0, "widgets": 0, "images": bool(as_images)}
+    doc = fitz.open("pdf", data)
+    out = None
+    tmp = out_path + ".part"
+    try:
+        info["pages"] = doc.page_count
+        for page in doc:
+            info["annots"] += len(list(page.annots() or []))
+            info["widgets"] += len(list(page.widgets() or []))
+        check()
+        if hasattr(doc, "bake"):
+            doc.bake(annots=True, widgets=True)
+        else:
+            _bake_fallback(doc)
+        if progress:
+            progress(1, doc.page_count + 1)
+        result = doc
+        if as_images:
+            out = fitz.open()
+            n = doc.page_count
+            for i in range(n):
+                check()
+                page = doc[i]
+                pix = page.get_pixmap(dpi=int(dpi), alpha=False)
+                np_ = out.new_page(width=page.rect.width, height=page.rect.height)
+                np_.insert_image(np_.rect, stream=pix.tobytes("jpeg", jpg_quality=int(jpeg_quality)))
+                if progress:
+                    progress(i + 2, n + 1)
+            out.set_metadata(doc.metadata or {})
+            try:
+                out.set_toc(doc.get_toc())
+            except Exception:
+                pass
+            result = out
+        kwargs = docsec.apply_compression(result, compress)
+        kwargs.update(docsec.save_kwargs(security))
+        check()
+        result.save(tmp, **kwargs)
+        check()
+        os.replace(tmp, out_path)
+        if progress:
+            progress(info["pages"] + 1, info["pages"] + 1)
+    except BaseException:
+        if os.path.exists(tmp):
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+        raise
+    finally:
+        if out is not None:
+            out.close()
+        doc.close()
+    return info
+
+
+# ---------------------------------------------------------------------------
 # JSON proje kaydı
 # ---------------------------------------------------------------------------
 def save_project_json(path: str, session) -> None:

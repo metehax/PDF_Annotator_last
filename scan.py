@@ -17,7 +17,8 @@ from PIL import Image, ImageOps
 from pdf_engine import IMAGE_EXTS, IMAGE_PAGE_MAX_PT
 
 __all__ = ["IMAGE_EXTS", "FILTERS", "PAGE_SIZES", "load_image", "detect_corners", "order_points",
-           "warp", "rotate", "apply_filter", "to_pdf", "images_to_pdfs"]
+           "warp", "rotate", "estimate_skew", "deskew", "default_shadow", "erase_strokes", "apply_filter", "to_pdf",
+           "images_to_pdfs"]
 
 MAX_SIDE = 3000          # yüklenen görüntünün en uzun kenarı (px)
 DETECT_SIDE = 700        # köşe aramada çalışılan küçültülmüş boyut (px)
@@ -176,6 +177,86 @@ def rotate(img, derece: float) -> np.ndarray:
 
 
 # ---------------------------------------------------------------------------
+# Eğim (deskew) ve temizleme fırçası
+# ---------------------------------------------------------------------------
+SKEW_MAX = 15.0
+
+
+def _ink_mask(a: np.ndarray, side: int = 700) -> Optional[np.ndarray]:
+    """Metin (koyu mürekkep) maskesi, küçültülmüş. Yeterli mürekkep yoksa None."""
+    g = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY)
+    k = min(1.0, side / max(g.shape))
+    if k < 1:
+        g = cv2.resize(g, (max(1, round(g.shape[1] * k)), max(1, round(g.shape[0] * k))), interpolation=cv2.INTER_AREA)
+    g = cv2.GaussianBlur(g, (3, 3), 0)
+    bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY_INV,
+                               max(15, (min(g.shape) // 12) | 1), 12)
+    frac = float(np.count_nonzero(bw)) / bw.size
+    return bw if 0.004 < frac < 0.5 else None
+
+
+def _profile_score(mask: np.ndarray, angle: float) -> float:
+    """Maskeyi `angle` derece döndürüp yatay izdüşümün (satır toplamları) varyansı: satırlar yataysa en büyük."""
+    h, w = mask.shape
+    m = cv2.getRotationMatrix2D((w / 2, h / 2), angle, 1.0)
+    r = cv2.warpAffine(mask, m, (w, h), flags=cv2.INTER_NEAREST)
+    return float(np.var(r.sum(axis=1, dtype=np.float64)))
+
+
+def estimate_skew(img, max_derece: float = SKEW_MAX) -> float:
+    """Metin satırlarını yataya getirmek için gereken saat yönü açısı (derece; `rotate` ile aynı yön).
+    Güvenilmezse (az metin, belirsiz tepe, aralık kenarı) 0 döner."""
+    a = _as_rgb(img)
+    mask = _ink_mask(a)
+    if mask is None:
+        return 0.0
+    mx = float(max_derece)
+    coarse = np.arange(-mx, mx + 0.01, 1.0)
+    scores = [_profile_score(mask, -ang) for ang in coarse]
+    i = int(np.argmax(scores))
+    best = float(coarse[i])
+    fine = np.arange(best - 1.0, best + 1.001, 0.1)
+    fine = fine[np.abs(fine) <= mx]
+    fs = [_profile_score(mask, -ang) for ang in fine]
+    best = float(fine[int(np.argmax(fs))])
+    top = max(fs)
+    base = _profile_score(mask, 0.0)
+    med = float(np.median(scores))
+    if abs(best) >= mx - 0.5:                                  # aralık kenarı: gerçek eğim daha büyük olabilir
+        return 0.0
+    if top < base * 1.10 or top < med * 1.5:                   # belirgin bir tepe yok (metin satırı yok / gürültü)
+        return 0.0
+    return round(best, 1) if abs(best) >= 0.2 else 0.0
+
+
+def deskew(img, max_derece: float = SKEW_MAX):
+    """Metin satırı eğimini düzeltir → (görüntü, uygulanan açı). Eğim yoksa/güvenilmezse görüntüye dokunulmaz (açı 0)."""
+    a = _as_rgb(img)
+    ang = estimate_skew(a, max_derece)
+    if ang == 0.0:
+        return a.copy(), 0.0
+    return rotate(a, ang), ang
+
+
+def erase_strokes(img, strokes) -> np.ndarray:
+    """Beyaz boyama ("Temizle" fırçası): strokes = [(noktalar [(x, y) kesir 0…1], yarıçap (kısa kenara oran)), …].
+    Tek noktalı vuruş daire, çok noktalı vuruş kalın çizgidir. Yalnızca verilen görüntü kopyasını değiştirir."""
+    a = _as_rgb(img).copy()
+    h, w = a.shape[:2]
+    for pts, rad in strokes or ():
+        r = max(1, int(round(float(rad) * min(h, w))))
+        px = [(int(round(float(x) * (w - 1))), int(round(float(y) * (h - 1)))) for x, y in pts]
+        if len(px) == 1:
+            cv2.circle(a, px[0], r, (255, 255, 255), -1)
+        else:
+            for p, q in zip(px, px[1:]):
+                cv2.line(a, p, q, (255, 255, 255), 2 * r)
+            cv2.circle(a, px[0], r, (255, 255, 255), -1)
+            cv2.circle(a, px[-1], r, (255, 255, 255), -1)
+    return a
+
+
+# ---------------------------------------------------------------------------
 # Filtreler
 # ---------------------------------------------------------------------------
 def _bright_contrast(a: np.ndarray, parlaklik: float, kontrast: float) -> np.ndarray:
@@ -213,13 +294,26 @@ def _gray3(g: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(np.stack([g] * 3, axis=-1))
 
 
-def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: float = 0) -> np.ndarray:
+def default_shadow(ad: str) -> bool:
+    """Filtrenin varsayılan gölge düzleştirmesi: `belge` ve `gölgesiz renkli` açık, diğerleri kapalı."""
+    key = _FILTER_KEYS.get(_fold(ad))
+    if key is None:
+        raise ValueError(f"Bilinmeyen filtre: {ad!r}")
+    return key in ("belge", "gölgesiz renkli")
+
+
+def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: float = 0,
+                 golge: Optional[bool] = None) -> np.ndarray:
     """Filtre uygular (bkz. `FILTERS`; Türkçe karakter/büyük harf farkı yok sayılır).
-    Çıktı her zaman giriş boyutunda (h, w, 3) uint8; `belge` yalnızca 0/255 içerir."""
+    `golge`: gölge/aydınlatma düzleştirme — None: filtrenin varsayılanı (`default_shadow`), True/False: her filtrede
+    elle aç/kapa. Çıktı her zaman giriş boyutunda (h, w, 3) uint8; `belge` yalnızca 0/255 içerir."""
     key = _FILTER_KEYS.get(_fold(ad))
     if key is None:
         raise ValueError(f"Bilinmeyen filtre: {ad!r}")
     a = _as_rgb(img)
+    flat = default_shadow(ad) if golge is None else bool(golge)
+    if flat and key not in ("belge", "gölgesiz renkli"):
+        a = _flatten(a)                                    # diğer filtrelerde yalnız istenirse
     if key == "orijinal":
         out = a.copy()
     elif key == "otomatik":
@@ -231,7 +325,10 @@ def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: floa
             out = np.clip((a.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(np.uint8)
         out = _unsharp(out, 0.4)
     elif key == "belge":
-        g = _bright_contrast(_flatten(cv2.cvtColor(a, cv2.COLOR_RGB2GRAY)), parlaklik, kontrast)
+        g = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY)
+        if flat:
+            g = _flatten(g)
+        g = _bright_contrast(g, parlaklik, kontrast)
         block = max(15, (min(g.shape) // 20) | 1)
         bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, 15)
         return _gray3(bw)
@@ -244,7 +341,7 @@ def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: floa
         hsv[:, :, 1] = np.clip(hsv[:, :, 1].astype(np.float32) * 1.3, 0, 255).astype(np.uint8)
         out = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
     else:  # gölgesiz renkli
-        out = _unsharp(_flatten(a), 0.3)
+        out = _unsharp(_flatten(a) if flat else a, 0.3)
     return _bright_contrast(out, parlaklik, kontrast)
 
 

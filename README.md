@@ -55,7 +55,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/compare.py` | Karşılaştırma modunun "Değişiklikler" paneli: sayfa sayfa liste, tür süzgeci, önceki/sonraki |
 | `convert.py`    | **PDF → Word** (pdf2docx) ve **PDF → Excel** (PyMuPDF `find_tables` + openpyxl) çekirdeği |
 | `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
-| `scan.py`       | **Belge tarama** çekirdeği (OpenCV, arayüzsüz): fotoğraftan kâğıt köşelerini bulma, perspektif düzeltme, döndürme, 6 filtre (orijinal/otomatik/belge/gri/canlı/gölgesiz renkli), sayfaları PDF'e aktarma. Arayüzü G2'de |
+| `scan.py`       | **Belge tarama** çekirdeği (OpenCV, arayüzsüz): fotoğraftan kâğıt köşelerini bulma, perspektif düzeltme, döndürme, **eğim (deskew)**, 6 filtre + gölge düzleştirme anahtarı, temizleme fırçası, sayfaları PDF'e aktarma. Arayüzü G2'de |
+| `ui/flatten.py` | **Düzleştir ve kaydet** penceresi: işaret/yorum/form alanlarını sayfaya gömme, isteğe bağlı resme çevirme |
 | `ui/scanner.py` | **Belge tara** penceresi: köşe kulpları (otomatik + elle), filtre kartları, parlaklık/kontrast, döndür, sayfa şeridi, PDF/OCR üretimi |
 | `ui/imgpdf.py`  | **Görselleri PDF'e çevir** penceresi: sürükle-bırak, sıralama, sayfa boyutu/yön/kenar boşluğu/kalite, tek ya da ayrı PDF |
 | `workspace.py`  | **Çalışma klasörü + otomatik kurtarma çekirdeği:** kök/alt klasörler (Gelen, Taramalar, Donusturulenler, Projeler, Yedekler, IsAkisi), çıktı tercihleri, son klasör, eski gelen klasörü taşıma, kurtarma taslakları |
@@ -422,3 +423,13 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   yazılır; kutuya sığmıyorsa yazılmaz (silme yine olur). KVKK penceresi aynı seçenekleri kullanır.
 * **Eski projeler** (etiket alanı olmayan JSON) olduğu gibi açılır.
 * **Düzeltme:** döndürülmüş sayfalarda sansür kutusu artık görünen konuma göre uygulanır (önceden altındaki metin silinmeyebiliyordu).
+
+## Yeni: Tarama sonrası müdahale ve PDF düzleştirme
+* **Belge tara → Düzeltme:** **Otomatik eğim düzelt** metin satırlarının eğimini bulup kaydırıcıya yazar (elle ±15°, 0,1° adım; belirgin metin yoksa
+  dokunmaz). **Gölge düzleştir** her filtrede açılıp kapatılabilir (Belge ve Gölgesiz renkli'de varsayılan açık). **Temizle fırçası** Sonuç
+  görünümünde leke/parmak izini beyaza boyar (geri alınabilir; yalnız bu taramada, çıktıya pişer; köşe/döndürme/eğim değişince sıfırlanır).
+  **Bu sayfayı sıfırla** yalnız seçili sayfanın tüm ayarlarını başa alır; her sayfanın ayarı ayrıdır.
+* **Belge → Düzleştir ve kaydet…:** işaretleri, yorumları, vurguları ve **form alanlarını** sayfa içeriğine gömer (artık düzenlenebilir nesne kalmaz,
+  görünüm aynı; metin kalır). **Sayfaları resme çevir** seçeneği (150/200/300 dpi, JPEG kalitesi) metni de kaldırır: kopyalanamaz/aranamaz.
+  Açık belge değişmez, sonuç `*_duzlestirilmis.pdf` olarak kaydedilip yeni sekmede açılır; iş arka planda çalışır, durdurulabilir.
+  Sansür kutuları önce gerçekten uygulanır (altındaki metin silinir), sonra gömülür.

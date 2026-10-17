@@ -9,7 +9,7 @@ ağır iş (işleme + PDF + OCR) `BackgroundJob`'da çalışır.
 from __future__ import annotations
 
 import os
-from dataclasses import dataclass
+from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Union
 
 import numpy as np
@@ -20,7 +20,7 @@ from PySide6.QtWidgets import (
     QAbstractItemView, QCheckBox, QComboBox, QDialog, QFileDialog, QGraphicsEllipseItem,
     QGraphicsPixmapItem, QGraphicsPolygonItem, QGraphicsScene, QGraphicsView, QHBoxLayout, QLabel,
     QListView, QListWidget, QListWidgetItem, QMessageBox, QProgressBar, QPushButton, QSlider,
-    QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
+    QScrollArea, QSpinBox, QStackedWidget, QVBoxLayout, QWidget,
 )
 
 import convert
@@ -139,9 +139,19 @@ def default_corners(src: Source, img: np.ndarray) -> np.ndarray:
     return (scan.detect_corners(img) / [w, h]).astype(np.float32)
 
 
+def finish_page(img: np.ndarray, skew: float, filt: str, br: float, ct: float, shadow: Optional[bool] = None,
+                strokes=()) -> np.ndarray:
+    """Köşeden düzeltilmiş görüntüyü bitirir: eğim açısı → filtre (+ gölge düzleştirme) → temizleme fırçası vuruşları."""
+    if abs(skew) >= 0.05:
+        img = scan.rotate(img, skew)
+    out = scan.apply_filter(img, filt, br, ct, shadow)
+    return scan.erase_strokes(out, strokes) if strokes else out
+
+
 def render_page(src: Source, rot: int, corners: Optional[np.ndarray], filt: str, br: float, ct: float,
-                cache: Optional[Dict[int, "fitz.Document"]] = None) -> np.ndarray:
-    """Tek sayfanın nihai görüntüsü: yükle → döndür → köşelerden düzelt → filtre."""
+                cache: Optional[Dict[int, "fitz.Document"]] = None, skew: float = 0.0,
+                shadow: Optional[bool] = None, strokes=()) -> np.ndarray:
+    """Tek sayfanın nihai görüntüsü: yükle → döndür → köşelerden düzelt → eğim → filtre → fırça."""
     img = load_source(src, cache)
     if rot % 360:
         img = scan.rotate(img, rot)
@@ -149,7 +159,10 @@ def render_page(src: Source, rot: int, corners: Optional[np.ndarray], filt: str,
     c = default_corners(src, img) if corners is None else corners
     if not is_full(c):
         img = scan.warp(img, to_px(c, w, h))
-    return scan.apply_filter(img, filt, br, ct)
+    return finish_page(img, skew, filt, br, ct, shadow, strokes)
+
+
+BRUSH_DEFAULT = 15                 # fırça yarıçapı: kısa kenarın binde kaçı
 
 
 @dataclass(eq=False)
@@ -160,10 +173,13 @@ class ScanPage:
     filt: str = "otomatik"
     br: int = 0
     ct: int = 0
+    skew: float = 0.0                          # eğim düzeltme açısı (derece, saat yönü; elle ya da otomatik)
+    shadow: Optional[bool] = None              # gölge düzleştirme: None = filtrenin varsayılanı
+    strokes: list = field(default_factory=list)  # temizleme fırçası: [(noktalar[kesir], yarıçap)] — sonuç görüntüsüne göre
 
     def spec(self):
         return (self.src, self.rot, None if self.corners is None else self.corners.copy(),
-                self.filt, self.br, self.ct)
+                self.filt, self.br, self.ct, self.skew, self.shadow, [(list(pts), r) for pts, r in self.strokes])
 
 
 # ---------------------------------------------------------------------------
@@ -273,6 +289,38 @@ class CornerView(QGraphicsView):
         self._fit()
 
 
+class _PaintLabel(QLabel):
+    """Sonuç önizlemesi; fırça modunda fare vuruşlarını (widget koordinatı) bildirir."""
+    pressed = Signal(object)
+    moved = Signal(object)
+    released = Signal()
+
+    def __init__(self, text: str = ""):
+        super().__init__(text)
+        self.painting = False
+        self._down = False
+
+    def mousePressEvent(self, e):
+        if self.painting and e.button() == Qt.MouseButton.LeftButton:
+            self._down = True
+            self.pressed.emit(e.position())
+        else:
+            super().mousePressEvent(e)
+
+    def mouseMoveEvent(self, e):
+        if self.painting and self._down:
+            self.moved.emit(e.position())
+        else:
+            super().mouseMoveEvent(e)
+
+    def mouseReleaseEvent(self, e):
+        if self.painting and self._down:
+            self._down = False
+            self.released.emit()
+        else:
+            super().mouseReleaseEvent(e)
+
+
 # ---------------------------------------------------------------------------
 # Pencere
 # ---------------------------------------------------------------------------
@@ -290,6 +338,7 @@ class ScanDialog(QDialog):
         self._cache: Dict[int, "fitz.Document"] = {}
         self._job: Optional[BackgroundJob] = None
         self._loading = False
+        self._live_stroke = None                      # çizilmekte olan fırça vuruşu
         self._tessdata = ocr.find_tessdata()
 
         self._timer = QTimer(self)
@@ -329,7 +378,10 @@ class ScanDialog(QDialog):
         self.view = CornerView()
         self.view.changed.connect(self._corners_edited)
         self.stack.addWidget(self.view)
-        self.result_lbl = QLabel("Sayfa ekleyin")
+        self.result_lbl = _PaintLabel("Sayfa ekleyin")
+        self.result_lbl.pressed.connect(self._brush_press)
+        self.result_lbl.moved.connect(self._brush_move)
+        self.result_lbl.released.connect(self._brush_release)
         self.result_lbl.setObjectName("scanCanvas")
         self.result_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.result_lbl.setMinimumSize(200, 200)
@@ -342,10 +394,15 @@ class ScanDialog(QDialog):
         # -- sağ: filtre, ayarlar, seçenekler --------------------------------
         side = QVBoxLayout()
         side.setSpacing(6)
-        side_w = QWidget()
-        side_w.setFixedWidth(272)
-        side_w.setLayout(side)
-        side.setContentsMargins(0, 0, 0, 0)
+        side_in = QWidget()
+        side_in.setLayout(side)
+        side.setContentsMargins(0, 0, 8, 0)
+        side_w = QScrollArea()                       # küçük ekranlarda sağ panel kaydırılabilsin
+        side_w.setWidgetResizable(True)
+        side_w.setFrameShape(QScrollArea.Shape.NoFrame)
+        side_w.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
+        side_w.setFixedWidth(296)
+        side_w.setWidget(side_in)
         mid.addWidget(side_w)
         lbl = QLabel("FİLTRE")
         lbl.setObjectName("sectionTitle")
@@ -379,7 +436,49 @@ class ScanDialog(QDialog):
         for b in (self.btn_ccw, self.btn_cw, self.btn_reset):
             rot.addWidget(b)
         side.addLayout(rot)
-        side.addSpacing(6)
+        side.addSpacing(4)
+        lbl = QLabel("DÜZELTME")
+        lbl.setObjectName("sectionTitle")
+        side.addWidget(lbl)
+        row = QHBoxLayout()
+        row.addWidget(QLabel("Eğim"))
+        self.lb_skew = QLabel("+0,0°")
+        self.lb_skew.setObjectName("valueLbl")
+        row.addStretch(1)
+        row.addWidget(self.lb_skew)
+        side.addLayout(row)
+        self.sl_skew = QSlider(Qt.Orientation.Horizontal)
+        self.sl_skew.setRange(int(-scan.SKEW_MAX * 10), int(scan.SKEW_MAX * 10))    # 0,1° adım, ±15°
+        self.sl_skew.valueChanged.connect(self._skew_changed)
+        side.addWidget(self.sl_skew)
+        self.btn_deskew = QPushButton(icon("rotate_cw"), "Otomatik eğim düzelt")
+        self.btn_deskew.clicked.connect(self.auto_deskew)
+        side.addWidget(self.btn_deskew)
+        self.chk_shadow = QCheckBox("Gölge düzleştir")
+        self.chk_shadow.setToolTip("Aydınlatma/gölge farkını giderir; her filtrede açılıp kapatılabilir")
+        self.chk_shadow.toggled.connect(self._shadow_toggled)
+        side.addWidget(self.chk_shadow)
+        brow = QHBoxLayout()
+        self.btn_brush = QPushButton(icon("blur"), "Temizle fırçası")
+        self.btn_brush.setCheckable(True)
+        self.btn_brush.setToolTip("Sonuç üzerinde leke/parmak izini beyaza boyar (yalnız bu taramada; çıktıya pişer)")
+        self.btn_brush.toggled.connect(self._brush_toggled)
+        self.btn_brush_undo = QPushButton("Geri al")
+        self.btn_brush_undo.clicked.connect(self.brush_undo)
+        brow.addWidget(self.btn_brush, 1)
+        brow.addWidget(self.btn_brush_undo)
+        side.addLayout(brow)
+        self.sl_brush = QSlider(Qt.Orientation.Horizontal)
+        self.sl_brush.setRange(5, 40)
+        self.sl_brush.setValue(BRUSH_DEFAULT)
+        self.sl_brush.setToolTip("Fırça boyu")
+        self.sl_brush.hide()
+        side.addWidget(self.sl_brush)
+        self.btn_page_reset = QPushButton(icon("reset"), "Bu sayfayı sıfırla")
+        self.btn_page_reset.setToolTip("Bu sayfanın köşe, döndürme, eğim, filtre ve fırça ayarlarını başa alır")
+        self.btn_page_reset.clicked.connect(self.reset_page)
+        side.addWidget(self.btn_page_reset)
+        side.addSpacing(4)
         lbl = QLabel("ÇIKTI")
         lbl.setObjectName("sectionTitle")
         side.addWidget(lbl)
@@ -489,12 +588,14 @@ class ScanDialog(QDialog):
         has = self.cur is not None
         busy = self._job is not None
         for w in (self.btn_auto, self.btn_full, self.btn_ccw, self.btn_cw, self.btn_reset, self.btn_del,
-                  self.filters, self.sl_br, self.sl_ct):
+                  self.filters, self.sl_br, self.sl_ct, self.sl_skew, self.btn_deskew, self.chk_shadow,
+                  self.btn_brush, self.btn_page_reset):
             w.setEnabled(has and not busy)
         n = len(self.pages)
         row = self.strip.currentRow()
         self.btn_left.setEnabled(has and not busy and row > 0)
         self.btn_right.setEnabled(has and not busy and 0 <= row < n - 1)
+        self.btn_brush_undo.setEnabled(has and not busy and bool(self.cur and self.cur.strokes))
         self.btn_add.setEnabled(not busy)
         self.strip.setEnabled(not busy)
         self.btn_run.setEnabled(n > 0 and not busy)
@@ -599,6 +700,7 @@ class ScanDialog(QDialog):
             self.sl_ct.setValue(p.ct)
             self.lb_br.setText(str(p.br))
             self.lb_ct.setText(str(p.ct))
+            self._sync_skew_shadow()
         except Exception as ex:
             self._work = None
             QMessageBox.warning(self, "Sayfa açılamadı", f"{p.src.label}\n{ex}")
@@ -622,6 +724,7 @@ class ScanDialog(QDialog):
     def _set_corners(self, c: np.ndarray):
         self.cur.corners = np.asarray(c, np.float32).copy()
         self.view.set_corners(self.cur.corners)
+        self._invalidate_strokes()
         self._refresh_preview()
 
     def rotate_page(self, derece: int):
@@ -631,17 +734,20 @@ class ScanDialog(QDialog):
         c = rotate_corners(p.corners if p.corners is not None else FULL, derece)
         p.rot = (p.rot + derece) % 360
         p.corners = c
+        self._invalidate_strokes()
         self._load_page(p)
 
     def _corners_edited(self):
         if self.cur is not None and not self._loading:
             self.cur.corners = self.view.corners()
+            self._invalidate_strokes()
             self._timer.start()
 
     def _filter_picked(self, row: int):
         if self.cur is None or self._loading or row < 0:
             return
         self.cur.filt = scan.FILTERS[row]
+        self._sync_skew_shadow()
         self._refresh_preview(cards=False)
 
     def _adjust_changed(self):
@@ -651,6 +757,116 @@ class ScanDialog(QDialog):
             return
         self.cur.br, self.cur.ct = self.sl_br.value(), self.sl_ct.value()
         self._timer.start()
+
+    # -- eğim / gölge / fırça / sayfa sıfırlama ----------------------------------------
+    def _sync_skew_shadow(self):
+        """Seçili sayfanın eğim ve gölge kontrollerini gösterir (sinyal göndermeden)."""
+        p = self.cur
+        if p is None:
+            return
+        for w in (self.sl_skew, self.chk_shadow):
+            w.blockSignals(True)
+        self.sl_skew.setValue(int(round(p.skew * 10)))
+        self.lb_skew.setText(f"{p.skew:+.1f}°".replace(".", ","))
+        self.chk_shadow.setChecked(scan.default_shadow(p.filt) if p.shadow is None else p.shadow)
+        for w in (self.sl_skew, self.chk_shadow):
+            w.blockSignals(False)
+
+    def _invalidate_strokes(self):
+        """Köşe/döndürme/eğim değişince eski fırça vuruşları yeni görüntüyle hizalı olmaz: sıfırlanır."""
+        p = self.cur
+        if p is not None and p.strokes:
+            p.strokes = []
+            self.hint.setText("Görüntü değiştiği için fırça vuruşları sıfırlandı.")
+
+    def _skew_changed(self, v: int):
+        self.lb_skew.setText(f"{v / 10:+.1f}°".replace(".", ","))
+        if self.cur is None or self._loading:
+            return
+        self.cur.skew = v / 10.0
+        self._invalidate_strokes()
+        self._timer.start()
+
+    def auto_deskew(self):
+        """Metin satırı eğimini bulup kaydırıcıya yazar; bulunan açıyı döndürür."""
+        p = self.cur
+        warped = self._warped_work()
+        if p is None or warped is None:
+            return 0.0
+        ang = scan.estimate_skew(warped)
+        p.skew = ang
+        self._invalidate_strokes()
+        self._sync_skew_shadow()
+        self.hint.setText(f"Eğim düzeltildi: {ang:+.1f}°".replace(".", ",") if ang else "Belirgin bir metin eğimi bulunamadı.")
+        self._refresh_preview(cards=False)
+        return ang
+
+    def _shadow_toggled(self, on: bool):
+        if self.cur is None or self._loading:
+            return
+        self.cur.shadow = bool(on)
+        self._refresh_preview(cards=False)
+
+    def reset_page(self):
+        """Seçili sayfanın tüm ayarlarını başa alır (köşeler yeniden algılanır)."""
+        p = self.cur
+        if p is None:
+            return
+        p.rot, p.corners, p.filt, p.br, p.ct = 0, None, "otomatik", 0, 0
+        p.skew, p.shadow, p.strokes = 0.0, None, []
+        self._live_stroke = None
+        self._load_page(p)
+        self.hint.setText("Sayfa sıfırlandı.")
+
+    def _brush_toggled(self, on: bool):
+        self.result_lbl.painting = bool(on)
+        self.sl_brush.setVisible(bool(on))
+        self.result_lbl.setCursor(Qt.CursorShape.CrossCursor if on else Qt.CursorShape.ArrowCursor)
+        if on:
+            self._show_view(1)
+            self.hint.setText("Sonuç üzerinde sürükleyerek leke/parmak izini silin (beyaza boyanır).")
+
+    def _to_fraction(self, pos) -> Optional[tuple]:
+        """Widget koordinatını sonuç görüntüsünün kesir koordinatına çevirir (görüntü dışıysa None)."""
+        pm = self.result_lbl.pixmap()
+        if pm is None or pm.isNull():
+            return None
+        off_x = (self.result_lbl.width() - pm.width()) / 2
+        off_y = (self.result_lbl.height() - pm.height()) / 2
+        x, y = (pos.x() - off_x) / max(pm.width(), 1), (pos.y() - off_y) / max(pm.height(), 1)
+        if not (0 <= x <= 1 and 0 <= y <= 1):
+            return None
+        return (x, y)
+
+    def _brush_radius(self) -> float:
+        return self.sl_brush.value() / 1000.0
+
+    def _brush_press(self, pos):
+        pt = self._to_fraction(pos)
+        if self.cur is None or pt is None:
+            return
+        self._live_stroke = ([pt], self._brush_radius())
+        self._refresh_preview(cards=False)
+
+    def _brush_move(self, pos):
+        pt = self._to_fraction(pos)
+        if self._live_stroke is None or pt is None:
+            return
+        self._live_stroke[0].append(pt)
+        self._refresh_preview(cards=False)
+
+    def _brush_release(self):
+        if self.cur is not None and self._live_stroke is not None:
+            self.cur.strokes.append(self._live_stroke)
+        self._live_stroke = None
+        self._refresh_preview(cards=False)
+        self._enable()
+
+    def brush_undo(self):
+        if self.cur is not None and self.cur.strokes:
+            self.cur.strokes.pop()
+            self._refresh_preview(cards=False)
+            self._enable()
 
     def _reset_adjust(self):
         self.sl_br.setValue(0)
@@ -670,7 +886,8 @@ class ScanDialog(QDialog):
         warped = self._warped_work()
         if warped is None:
             return
-        self.preview_array = scan.apply_filter(warped, p.filt, p.br, p.ct)
+        strokes = list(p.strokes) + ([self._live_stroke] if self._live_stroke else [])
+        self.preview_array = finish_page(warped, p.skew, p.filt, p.br, p.ct, p.shadow, strokes)
         self.result_lbl.setText("")
         self._fit_result()
         item = self.strip.currentItem()
@@ -726,10 +943,10 @@ class ScanDialog(QDialog):
             cache: Dict[int, "fitz.Document"] = {}
             arrays = []
             try:
-                for i, (src, rot, corners, filt, br, ct) in enumerate(specs):
+                for i, (src, rot, corners, filt, br, ct, skew, shadow, strokes) in enumerate(specs):
                     if cancelled():
                         raise convert.Cancelled()
-                    arrays.append(render_page(src, rot, corners, filt, br, ct, cache))
+                    arrays.append(render_page(src, rot, corners, filt, br, ct, cache, skew, shadow, strokes))
                     progress(i + 1, total)
             finally:
                 for d in cache.values():

@@ -23,6 +23,7 @@ from headfoot import HeadFootConfig
 from ui.docdialogs import CompressDialog, DocInfoDialog, PasswordDialog, SecurityCheckDialog
 from ui.a11y import A11yDialog
 from ui.convert import ConvertDialog
+from ui.flatten import FlattenDialog
 from ui.share import ShareDialog
 from ui.imgpdf import ImagesPdfDialog
 from ui.scanner import ScanDialog, pdf_sources
@@ -229,6 +230,16 @@ class DocToolsMixin:
         return dlg
 
     # -- Word / Excel dönüştürme ve erişilebilirlik ---------------------------
+    def open_flatten(self):
+        """İşaret/yorum/form alanlarını sayfa içeriğine gömen düzleştirilmiş kopya (isteğe bağlı resme çevirme)."""
+        s = self.active_session
+        if not s:
+            self.toasts.show("Önce bir belge açın.", "info")
+            return None
+        dlg = self._flatten_dialog = FlattenDialog(self, s)
+        dlg.show()
+        return dlg
+
     def open_convert(self, fmt: str = "docx"):
         s = self.active_session
         if not s:

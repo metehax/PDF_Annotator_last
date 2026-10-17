@@ -241,6 +241,124 @@ pump(ms=100)
 check("bos pencere: PDF olustur pasif", not d4.btn_run.isEnabled() and not d4.btn_auto.isEnabled())
 d4.close()
 
+# ====================== I3: eğim, gölge, fırça, sayfa sıfırlama ======================
+import scan as _scan
+from PySide6.QtCore import QPointF
+from ui.scanner import render_page
+
+pgimg = np.full((1200, 900, 3), 245, np.uint8)
+for _i in range(14):
+    cv2.putText(pgimg, "Belge tarama metni satir " + str(_i), (50, 110 + _i * 70), cv2.FONT_HERSHEY_SIMPLEX, 1.0, (25, 25, 25), 2, cv2.LINE_AA)
+TILT = os.path.join(tmp, "egik.png")
+Image.fromarray(_scan.rotate(pgimg, 6)).save(TILT)
+STRAIGHT = os.path.join(tmp, "duz.png")
+Image.fromarray(pgimg).save(STRAIGHT)
+td = ScanDialog(w, [TILT, STRAIGHT])
+td.resize(1180, 800)
+td.show()
+pump(ms=300)
+td.select_all()
+tp0 = td.cur
+check("eğim/gölge/fırça denetimleri var", all(hasattr(td, n) for n in ("sl_skew", "btn_deskew", "chk_shadow", "btn_brush", "btn_page_reset")))
+check("eğim kaydırıcısı ±15° (0,1° adım)", (td.sl_skew.minimum(), td.sl_skew.maximum()) == (-150, 150))
+check("başlangıç: eğim 0, gölge kutusu filtre varsayılanında", tp0.skew == 0.0 and td.sl_skew.value() == 0
+      and td.chk_shadow.isChecked() == _scan.default_shadow(tp0.filt))
+sh0 = td.preview_array.shape
+ang = td.auto_deskew()
+check("otomatik eğim düzelt: ≈ -6°", abs(ang + 6.0) <= 0.7 and abs(tp0.skew - ang) < 1e-6, str(ang))
+check("kaydırıcı bulunan açıyı gösterir", abs(td.sl_skew.value() - round(ang * 10)) <= 1 and "°" in td.lb_skew.text())
+check("eğim düzeltince önizleme değişti", td.preview_array.shape != sh0)
+td.filters.setCurrentRow(list(_scan.FILTERS).index("belge"))
+check("belge: gölge kutusu varsayılan açık", td.chk_shadow.isChecked() is True and tp0.shadow is None)
+td.chk_shadow.setChecked(False)
+td.filters.setCurrentRow(list(_scan.FILTERS).index("canlı"))
+td.filters.setCurrentRow(list(_scan.FILTERS).index("belge"))
+check("filtre değişince kullanıcının gölge seçimi korunur", tp0.shadow is False and td.chk_shadow.isChecked() is False)
+check("eğimli + filtre: kalan eğim ≤0,5°", abs(_scan.estimate_skew(td.preview_array)) <= 0.6, str(_scan.estimate_skew(td.preview_array)))
+# elle kaydırıcı
+before = td.preview_array.copy()
+td.sl_skew.setValue(-30)
+pump(until=lambda: abs(tp0.skew + 3.0) < 1e-6, limit=2000)
+pump(ms=300)
+check("kaydırıcı elle: sayfa açısı ve önizleme güncellenir", abs(tp0.skew + 3.0) < 1e-6 and not np.array_equal(td.preview_array, before)
+      and "-3,0" in td.lb_skew.text(), td.lb_skew.text())
+# gölge anahtarı
+td.reset_page()
+pump(ms=300)
+td.select_all()
+td.filters.setCurrentRow(list(_scan.FILTERS).index("gri"))
+check("gri: gölge kutusu varsayılan kapalı", td.chk_shadow.isChecked() is False and tp0.shadow is None)
+g_off = td.preview_array.copy()
+td.chk_shadow.setChecked(True)
+check("gölge açıldı: sayfaya yazıldı, önizleme değişti", tp0.shadow is True and not np.array_equal(td.preview_array, g_off))
+td.filters.setCurrentRow(list(_scan.FILTERS).index("belge"))
+check("belge: açık kalır (kullanıcı seçimi)", td.chk_shadow.isChecked() is True)
+td.chk_shadow.setChecked(False)
+check("belge'de de kapatılabilir", tp0.shadow is False)
+
+# fırça
+td.filters.setCurrentRow(list(_scan.FILTERS).index("gri"))
+td.btn_brush.setChecked(True)
+pump(ms=200)
+check("fırça açılınca sonuç görünümü + imleç", td.stack.currentIndex() == 1 and td.result_lbl.painting and not td.sl_brush.isHidden())
+lbl = td.result_lbl
+pm = lbl.pixmap()
+cx, cy = (lbl.width() - pm.width()) / 2 + pm.width() * 0.5, (lbl.height() - pm.height()) / 2 + pm.height() * 0.5
+dark_before = td.preview_array.shape and int((td.preview_array.mean(axis=2) < 128).sum())
+td._brush_press(QPointF(cx, cy))
+td._brush_move(QPointF(cx + 30, cy))
+td._brush_release()
+check("vuruş kaydedildi, geri al etkin", len(tp0.strokes) == 1 and td.btn_brush_undo.isEnabled())
+h_, w_ = td.preview_array.shape[:2]
+pt = tp0.strokes[0][0][0]
+check("vuruş yeri beyaz", tuple(td.preview_array[int(pt[1] * (h_ - 1)), int(pt[0] * (w_ - 1))]) == (255, 255, 255))
+check("görüntü dışı vuruş yok sayılır", (td._brush_press(QPointF(-50, -50)), td._live_stroke)[1] is None)
+rp = render_page(tp0.src, tp0.rot, tp0.corners, tp0.filt, tp0.br, tp0.ct, None, tp0.skew, tp0.shadow, tp0.strokes)
+check("dışa aktarım yolu vuruşları işler (render_page)", tuple(rp[int(pt[1] * (rp.shape[0] - 1)), int(pt[0] * (rp.shape[1] - 1))]) == (255, 255, 255))
+td.brush_undo()
+check("fırça geri al", tp0.strokes == [] and not td.btn_brush_undo.isEnabled())
+td._brush_press(QPointF(cx, cy))
+td._brush_release()
+td.sl_skew.setValue(20)
+check("eğim değişince fırça vuruşları sıfırlanır", tp0.strokes == [] and "sıfırlandı" in td.hint.text())
+td._brush_press(QPointF(cx, cy))
+td._brush_release()
+td.rotate_page(90)
+check("döndürünce fırça vuruşları sıfırlanır", tp0.strokes == [])
+td.rotate_page(-90)
+td.btn_brush.setChecked(False)
+check("fırça kapanınca boyama durur", not td.result_lbl.painting and td.sl_brush.isHidden())
+
+# sayfa başına ayar + sıfırlama
+td.strip.setCurrentRow(1)
+pump(ms=300)
+tp1 = td.cur
+check("ikinci sayfanın ayarları bağımsız (eğim 0, gölge varsayılan)", tp1.skew == 0.0 and tp1.shadow is None and tp1.strokes == [])
+a1 = td.auto_deskew()
+check("eğimsiz sayfada otomatik eğim: bulunamadı, 0", a1 == 0.0 and tp1.skew == 0.0 and "bulunamadı" in td.hint.text())
+td.strip.setCurrentRow(0)
+pump(ms=300)
+check("birinci sayfaya dönünce ayarlar korundu", tp0.shadow is not None and td.chk_shadow.isChecked() == tp0.shadow)
+tp0.skew = 4.0
+tp0.strokes.append(([(0.5, 0.5)], 0.02))
+td.btn_page_reset.click()
+pump(ms=300)
+check("Bu sayfayı sıfırla: eğim/gölge/fırça/filtre/döndürme varsayılan", tp0.skew == 0.0 and tp0.shadow is None and tp0.strokes == []
+      and tp0.filt == "otomatik" and tp0.rot == 0 and tp0.br == 0 and td.sl_skew.value() == 0 and "sıfırlandı" in td.hint.text())
+check("sıfırlama köşeleri yeniden algılar (tam kare, düz görsel)", tp0.corners is not None and td.view.corners().shape == (4, 2))
+# PDF üret: eğim uygulanmış çıktı
+td.select_all()
+td.auto_deskew()
+OUTT = os.path.join(tmp, "egik_cikti.pdf")
+td.start_export(OUTT)
+check("eğim düzeltilmiş PDF üretildi", pump(until=lambda: td.result_path is not None, limit=60000), td.status.text())
+od = fitz.open(OUTT)
+opm = od[0].get_pixmap(dpi=100, alpha=False)
+oarr = np.frombuffer(opm.samples, np.uint8).reshape(opm.height, opm.width, 3)
+check("çıktı sayfası eğimsiz (kalan ≤0,6°)", abs(_scan.estimate_skew(oarr)) <= 0.7, str(_scan.estimate_skew(oarr)))
+od.close()
+td.close()
+
 shot = os.path.join(SP, "g2_scan.png")
 dlg2 = ScanDialog(w, [P1, P2])
 dlg2.resize(1180, 800)

@@ -126,6 +126,61 @@ colored[:, 80:] = (60, 60, 200)
 cv_ = scan.apply_filter(colored, "canlı")
 check("filtre canli: renk korunur", cv_[10, 10, 0] > cv_[10, 10, 2] and cv_[10, 150, 2] > cv_[10, 150, 0])
 
+
+# ---- eğim (deskew)
+def text_page(w=900, h=1200, lines=14):
+    pg = np.full((h, w, 3), 245, np.uint8)
+    words = ["Belge", "tarama", "metni", "satir", "ornegi", "Rapor", "sonuc"]
+    for i in range(lines):
+        txt = " ".join(words[(i + j) % len(words)] for j in range(4))
+        cv2.putText(pg, txt, (60, 110 + i * 70), cv2.FONT_HERSHEY_SIMPLEX, 1.1, (25, 25, 25), 2, cv2.LINE_AA)
+    return pg
+
+
+tp = text_page()
+check("deskew: eğimsiz sayfaya dokunmaz (açı 0, aynı piksel)", scan.deskew(tp)[1] == 0.0 and np.array_equal(scan.deskew(tp)[0], tp))
+for tilt in (5.0, -7.3, 12.0, 2.0):
+    tilted = scan.rotate(tp, tilt)
+    fixed, ang = scan.deskew(tilted)
+    resid = scan.estimate_skew(fixed)
+    check(f"deskew: {tilt}° eğik metin -> açı ≈ {-tilt}°, kalan ≤0,5°", abs(ang + tilt) <= 0.6 and abs(resid) <= 0.5, f"açı {ang}, kalan {resid}")
+check("deskew: dönüş yönü rotate ile uyumlu (eğik + deskew ≈ düz)", abs(scan.estimate_skew(scan.rotate(scan.rotate(tp, 6), -6))) <= 0.5)
+check("deskew: aralık dışı (20°) güvenilmez -> 0", scan.deskew(scan.rotate(tp, 20))[1] == 0.0)
+check("deskew: max_derece ayarı (8° sınırı, 12° eğik -> 0)", scan.deskew(scan.rotate(tp, 12), 8)[1] == 0.0)
+blank = np.full((600, 800, 3), 250, np.uint8)
+check("deskew: boş sayfa -> 0", scan.deskew(blank)[1] == 0.0)
+noise = np.random.default_rng(5).integers(0, 255, (600, 800, 3), dtype=np.uint8)
+check("deskew: gürültü -> 0", scan.deskew(noise)[1] == 0.0)
+few = np.full((600, 800, 3), 250, np.uint8)
+cv2.putText(few, "a", (100, 300), cv2.FONT_HERSHEY_SIMPLEX, 0.8, (0, 0, 0), 2)
+check("deskew: neredeyse hiç metin yok -> 0", scan.deskew(few)[1] == 0.0)
+fd, fa = scan.deskew(scan.rotate(tp, 5))
+check("deskew: çıktı geçerli görüntü (RGB uint8)", fd.dtype == np.uint8 and fd.ndim == 3 and fd.shape[2] == 3)
+check("deskew: girdiyi değiştirmez", np.array_equal(tp, text_page()))
+
+# ---- gölge düzleştirme anahtarı
+grad = (np.linspace(1.0, 0.45, 900, dtype=np.float32)[None, :, None] * tp).astype(np.uint8)
+check("gölge: varsayılan None = eski davranış (belge/gölgesiz açık)", np.array_equal(scan.apply_filter(grad, "belge"), scan.apply_filter(grad, "belge", golge=True))
+      and np.array_equal(scan.apply_filter(grad, "gölgesiz renkli"), scan.apply_filter(grad, "gölgesiz renkli", golge=True)))
+check("gölge: default_shadow", scan.default_shadow("belge") and scan.default_shadow("Gölgesiz Renkli") and not scan.default_shadow("gri")
+      and not scan.default_shadow("orijinal"))
+bw_on, bw_off = scan.apply_filter(grad, "belge", golge=True), scan.apply_filter(grad, "belge", golge=False)
+check("gölge: belge'de kapatılabilir (çıktı değişir)", not np.array_equal(bw_on, bw_off))
+g0, g1 = scan.apply_filter(grad, "gri"), scan.apply_filter(grad, "gri", golge=True)
+spread = lambda im: float(abs(im[:, :150].mean() - im[:, -150:].mean()))
+check("gölge: gri filtrede de açılabilir (aydınlatma farkı azalır)", spread(g1) < spread(g0) * 0.5, f"{spread(g1):.1f} vs {spread(g0):.1f}")
+check("gölge: her filtrede şekil/tür korunur", all(scan.apply_filter(grad, f, golge=gv).shape == grad.shape and scan.apply_filter(grad, f, golge=gv).dtype == np.uint8
+                                                   for f in scan.FILTERS for gv in (True, False)))
+check("gölge: belge kapalıyken de yalnız 0/255", np.isin(bw_off, (0, 255)).all())
+
+# ---- temizleme fırçası
+base = np.full((200, 300, 3), 120, np.uint8)
+er = scan.erase_strokes(base, [([(0.5, 0.5)], 0.1), ([(0.1, 0.1), (0.4, 0.1)], 0.03)])
+check("fırça: nokta -> beyaz daire, uzakta dokunmaz", tuple(er[100, 150]) == (255, 255, 255) and tuple(er[190, 10]) == (120, 120, 120))
+check("fırça: çizgi vuruşu iki nokta arasını boyar", tuple(er[20, 75]) == (255, 255, 255) and tuple(er[20, 200]) == (120, 120, 120))
+check("fırça: girdi değişmez, boş liste kopya döndürür", tuple(base[100, 150]) == (120, 120, 120) and np.array_equal(scan.erase_strokes(base, []), base)
+      and scan.erase_strokes(base, None) is not base)
+
 # ---- to_pdf
 pages = [w, scan.apply_filter(w, "belge"), scan.rotate(w, 90)]
 doc = scan.to_pdf(pages, sayfa_boyutu="a4", kenar_bosluk_pt=20)

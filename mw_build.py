@@ -275,6 +275,7 @@ class BuildMixin:
         A(m_doc, "lock", "Parola koruması…", self.open_password)
         A(m_doc, "shield", "Güvenlik denetimi…", self.open_security_check)
         A(m_doc, "scan", "Bu belgeyi tara/kırp…", self.scan_document)
+        A(m_doc, "layers", "Düzleştir ve kaydet…", self.open_flatten)
         A(m_doc, "eye", "Erişilebilirlik denetimi…", self.open_a11y)
         A(m_doc, "download", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
         A(m_doc, "calc", "Excel'e dönüştür (tablolar, .xlsx)…", lambda: self.open_convert("xlsx"))
