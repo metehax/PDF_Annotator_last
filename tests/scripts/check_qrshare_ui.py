@@ -131,6 +131,27 @@ check("sunulan geçici dosya kaldırılabilir", dlg.btn_unoffer.isEnabled())
 dlg._unoffer()
 check("kaldırınca indirme yok", srv.listing() == [])
 
+# foto -> tarayıcı kuyruğu
+check("tarayıcı seçeneği kapalıyken düğme pasif", not dlg.chk_scan.isChecked() and not dlg.btn_scan.isEnabled())
+dlg.chk_scan.setChecked(True)
+ns = len(w.sessions)
+for nm in ("sayfa1.jpg", "sayfa2.jpg"):
+    box = bg(lambda nm=nm: post(url, photo, nm))
+    pump(until=lambda: "v" in box)
+check("foto kuyruğa birikti (iki)", pump(until=lambda: len(dlg._scan_queue) == 2), len(dlg._scan_queue))
+check("fotolar belge olarak açılmadı", len(w.sessions) == ns)
+check("taramayı bitir düğmesi sayıyı gösterir", dlg.btn_scan.isEnabled() and "(2)" in dlg.btn_scan.text(), dlg.btn_scan.text())
+box = bg(lambda: post(url, open(phone_pdf, "rb").read(), "kuyruk.pdf"))
+check("PDF yine belge olarak açılır", pump(until=lambda: len(w.sessions) == ns + 1), len(w.sessions))
+check("PDF kuyruğa girmedi", len(dlg._scan_queue) == 2)
+sd = dlg.finish_scan()
+pump(ms=300)
+check("taramayı bitir: tarayıcı iki fotoyla açıldı", sd is not None and len(sd.pages) == 2
+      and [os.path.basename(p.src.path) for p in sd.pages] == ["sayfa1.jpg", "sayfa2.jpg"], sd and len(sd.pages))
+check("kuyruk boşaldı, düğme pasif", dlg._scan_queue == [] and not dlg.btn_scan.isEnabled())
+sd.close()
+dlg.chk_scan.setChecked(False)
+
 # görüntü: sonda tek kez
 shot = os.path.join(SP, "f_share.png")
 dlg.grab().save(shot)

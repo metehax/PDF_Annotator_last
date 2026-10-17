@@ -65,6 +65,7 @@ from ui.a11y import A11yDialog
 from ui.compare import CompareDiffPanel
 from ui.convert import ConvertDialog
 from ui.share import ShareDialog
+from ui.imgpdf import ImagesPdfDialog
 from ui.scanner import ScanDialog, pdf_sources
 import textdiff
 import forms
@@ -856,6 +857,7 @@ class MainWindow(QMainWindow):
         m_file.addSeparator()
         A(m_file, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
         A(m_file, "scan", "Belge tara (görsellerden)…", self.scan_images, needs_doc=False)
+        A(m_file, "images", "Görselleri PDF'e çevir…", self.images_to_pdf, needs_doc=False)
         A(m_file, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
         A(m_file, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
         A(m_file, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
@@ -3779,6 +3781,12 @@ class MainWindow(QMainWindow):
         if not paths:
             return None
         dlg = self._scan_dialog = ScanDialog(self, list(paths))
+        dlg.show()
+        return dlg
+
+    def images_to_pdf(self, paths=None):
+        """Çoklu görseli tek PDF'e ya da her biri ayrı PDF'e çevirir (ayarlı, toplu yol)."""
+        dlg = self._imgpdf_dialog = ImagesPdfDialog(self, list(paths or []))
         dlg.show()
         return dlg
 

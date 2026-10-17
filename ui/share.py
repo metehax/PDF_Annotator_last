@@ -13,7 +13,7 @@ import os
 import shutil
 import tempfile
 import time
-from typing import Optional
+from typing import List, Optional
 
 from PySide6.QtCore import QStandardPaths, QTimer, QUrl, Qt, Signal
 from PySide6.QtGui import QDesktopServices, QPixmap
@@ -23,6 +23,7 @@ from PySide6.QtWidgets import (
 )
 
 import qrshare
+from pdf_engine import IMAGE_EXTS
 from ui.icons import icon
 
 IDLE_LIMIT_S = 15 * 60
@@ -104,6 +105,17 @@ class ShareDialog(QDialog):
         r2.addWidget(self.btn_folder)
         v.addLayout(r2)
         v.addWidget(self.dir_lbl)
+        r2b = QHBoxLayout()
+        self.chk_scan = QCheckBox("Gelen fotoğrafları tarayıcıda aç")
+        self.chk_scan.setToolTip("Fotoğraflar birikir; “Taramayı bitir” hepsini belge tarama penceresinde açar.")
+        self.btn_scan = QPushButton(icon("scan"), "Taramayı bitir")
+        self.btn_scan.setObjectName("secondary")
+        self.btn_scan.clicked.connect(self.finish_scan)
+        r2b.addWidget(self.chk_scan, 1)
+        r2b.addWidget(self.btn_scan)
+        v.addLayout(r2b)
+        self._scan_queue: List[str] = []
+        self._sync_scan()
 
         v.addWidget(QLabel("<b>Telefona gönder</b>"))
         r3 = QHBoxLayout()
@@ -212,8 +224,23 @@ class ShareDialog(QDialog):
         self.log.insertItem(0, f"{time.strftime('%H:%M')}   ✓ {name}")
         self.log.item(0).setData(Qt.ItemDataRole.UserRole, path)
         self._main.toasts.show(f"Telefondan alındı: {name}", "success")
-        if self.chk_open.isChecked():
+        if self.chk_scan.isChecked() and os.path.splitext(path)[1].lower() in IMAGE_EXTS:
+            self._scan_queue.append(path)                    # taramaya biriksin; belge olarak açılmaz
+            self._sync_scan()
+        elif self.chk_open.isChecked():
             self._main.open_paths([path])
+
+    def _sync_scan(self):
+        n = len(self._scan_queue)
+        self.btn_scan.setText(f"Taramayı bitir ({n})" if n else "Taramayı bitir")
+        self.btn_scan.setEnabled(n > 0)
+
+    def finish_scan(self):
+        """Biriken fotoğrafları belge tarama penceresinde açar ve kuyruğu boşaltır."""
+        paths = [p for p in self._scan_queue if os.path.exists(p)]
+        self._scan_queue = []
+        self._sync_scan()
+        return self._main.scan_images(paths) if paths else None
 
     def _open_item(self, item):
         p = item.data(Qt.ItemDataRole.UserRole)

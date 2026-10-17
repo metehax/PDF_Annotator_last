@@ -57,6 +57,7 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `a11y.py`       | **Erişilebilirlik denetimi** çekirdeği: 8 kontrol, rapor (HTML/TXT), dil/başlık/yer imi düzeltmeleri, OCR ile sayfa değiştirme |
 | `scan.py`       | **Belge tarama** çekirdeği (OpenCV, arayüzsüz): fotoğraftan kâğıt köşelerini bulma, perspektif düzeltme, döndürme, 6 filtre (orijinal/otomatik/belge/gri/canlı/gölgesiz renkli), sayfaları PDF'e aktarma. Arayüzü G2'de |
 | `ui/scanner.py` | **Belge tara** penceresi: köşe kulpları (otomatik + elle), filtre kartları, parlaklık/kontrast, döndür, sayfa şeridi, PDF/OCR üretimi |
+| `ui/imgpdf.py`  | **Görselleri PDF'e çevir** penceresi: sürükle-bırak, sıralama, sayfa boyutu/yön/kenar boşluğu/kalite, tek ya da ayrı PDF |
 | `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno) |
 | `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
@@ -385,3 +386,7 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 * **Filtre:** orijinal, otomatik, belge (gölgesiz siyah-beyaz), gri, canlı, gölgesiz renkli; parlaklık/kontrast ve ↺ ↻ döndürme. Her sayfanın ayarı ayrıdır.
 * **Sayfa şeridi:** sayfa ekle/sil, ◀ ▶ ya da sürükleyerek sırala.
 * **PDF oluştur…:** A4 / Letter / orijinal oran, JPEG kalitesi, isteğe bağlı **Aranabilir yap (OCR)**; iş arka planda çalışır, **Durdur** ile iptal edilir, sonuç yeni sekmede açılır.
+
+## Yeni: Görselleri PDF'e çevir ve telefondan taramaya aktarma
+* **Dosya → Görselleri PDF'e çevir…:** görselleri (ya da klasörü) pencereye sürükleyin/ekleyin, sırayı düzenleyin; sayfa boyutu (A4/Letter/orijinal), yön, kenar boşluğu ve JPEG kalitesi seçin. **Tek PDF** ya da **her görsel ayrı PDF** (var olan ad bozulmaz); sonuç uygulamada açılır (ayrıda en çok 10 sekme).
+* **Telefonla aktar (QR) → "Gelen fotoğrafları tarayıcıda aç":** gelen fotoğraflar belge olarak açılmaz, birikir; **Taramayı bitir (N)** hepsini Belge tara penceresinde açar. PDF'ler eskisi gibi açılır.

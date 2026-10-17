@@ -17,10 +17,11 @@ from PIL import Image, ImageOps
 from pdf_engine import IMAGE_EXTS, IMAGE_PAGE_MAX_PT
 
 __all__ = ["IMAGE_EXTS", "FILTERS", "PAGE_SIZES", "load_image", "detect_corners", "order_points",
-           "warp", "rotate", "apply_filter", "to_pdf"]
+           "warp", "rotate", "apply_filter", "to_pdf", "images_to_pdfs"]
 
 MAX_SIDE = 3000          # yüklenen görüntünün en uzun kenarı (px)
 DETECT_SIDE = 700        # köşe aramada çalışılan küçültülmüş boyut (px)
+TO_PDF_MAX_SIDE = 4000   # to_pdf dosya girdilerinde en uzun kenar (px)
 MIN_AREA_RATIO = 0.20    # kâğıt dörtgeninin görüntüye oranı (en az)
 MAX_AREA_RATIO = 0.98    # bunun üstü "tüm kare" sayılır (kâğıt bulunamadı)
 
@@ -269,18 +270,23 @@ def _encode(a: np.ndarray, jpeg_kalite: int) -> bytes:
 
 
 def to_pdf(sayfalar: Iterable[PageInput], out_path: Optional[str] = None, sayfa_boyutu: str = "a4",
-           kenar_bosluk_pt: float = 0, jpeg_kalite: int = 85):
+           kenar_bosluk_pt: float = 0, jpeg_kalite: int = 85, yon: str = "otomatik",
+           max_kenar: int = TO_PDF_MAX_SIDE):
     """Görüntüleri (dizi / PIL / dosya yolu) sayfa başına bir görüntü olacak şekilde PDF yapar.
     `sayfa_boyutu`: "a4" | "letter" | "orijinal" (piksel oranı; en uzun kenar `IMAGE_PAGE_MAX_PT`'yi aşmaz).
-    Görüntü kenar boşluğu içinde orantılı sığdırılır; sayfa yönü görüntüye göre seçilir.
+    Görüntü kenar boşluğu içinde orantılı sığdırılır; `yon`: "otomatik" (görüntüye göre) | "dikey" | "yatay".
+    Dosya yolu girdileri en uzun kenarı `max_kenar` px'e kadar korunarak yüklenir.
     `out_path` verilirse dosyaya yazar ve yolu döndürür, yoksa açık `fitz.Document` döndürür."""
     boyut = _fold(sayfa_boyutu)
     if boyut != "orijinal" and boyut not in PAGE_SIZES:
         raise ValueError(f"Bilinmeyen sayfa boyutu: {sayfa_boyutu!r}")
+    yon = _fold(yon)
+    if yon not in ("otomatik", "dikey", "yatay"):
+        raise ValueError(f"Bilinmeyen yön: {yon!r}")
     doc = fitz.open()
     try:
         for item in sayfalar:
-            a = _as_rgb(load_image(item) if isinstance(item, str) else item)
+            a = _as_rgb(load_image(item, max_kenar) if isinstance(item, str) else item)
             h, w = a.shape[:2]
             if boyut == "orijinal":
                 s = min(1.0, IMAGE_PAGE_MAX_PT / max(w, h))
@@ -288,7 +294,7 @@ def to_pdf(sayfalar: Iterable[PageInput], out_path: Optional[str] = None, sayfa_
                 m = 0.0
             else:
                 pw, ph = PAGE_SIZES[boyut]
-                if w > h:
+                if (w > h) if yon == "otomatik" else (yon == "yatay"):
                     pw, ph = ph, pw
                 m = max(0.0, min(float(kenar_bosluk_pt), min(pw, ph) / 2 - 1))
             page = doc.new_page(width=pw, height=ph)
@@ -306,3 +312,62 @@ def to_pdf(sayfalar: Iterable[PageInput], out_path: Optional[str] = None, sayfa_
         if not doc.is_closed:
             doc.close()
         raise
+
+
+def images_to_pdfs(paths: Sequence[str], out: str, ayri: bool = False, sayfa_boyutu: str = "a4",
+                   yon: str = "otomatik", kenar_bosluk_pt: float = 0, jpeg_kalite: int = 85,
+                   progress=None, cancelled=None) -> list:
+    """Görsel dosyalarını PDF'e çevirir (süzgeçsiz, olduğu gibi). `ayri=False`: hepsi `out` dosyasında
+    tek PDF; `ayri=True`: `out` klasörüne her görsel için `<ad>.pdf` (var olan ad bozulmaz, "(2)" eklenir).
+    `progress(i, n)`, `cancelled()` isteğe bağlı; iptalde `convert.Cancelled` fırlar ve yazılan dosya kalmaz.
+    Yazılan dosya yollarının listesini döndürür."""
+    from convert import Cancelled
+    paths = list(paths)
+    if not paths:
+        raise ValueError("Çevrilecek görsel yok")
+    n = len(paths)
+    opts = dict(sayfa_boyutu=sayfa_boyutu, kenar_bosluk_pt=kenar_bosluk_pt, jpeg_kalite=jpeg_kalite, yon=yon)
+    written: list = []
+
+    def step(i):
+        if cancelled is not None and cancelled():
+            raise Cancelled()
+        if progress is not None:
+            progress(i, n)
+
+    try:
+        if not ayri:
+            doc = fitz.open()
+            try:
+                for i, p in enumerate(paths):
+                    step(i)
+                    with to_pdf([p], **opts) as one:
+                        doc.insert_pdf(one)
+                step(n)
+                tmp = out + ".part"
+                doc.save(tmp, garbage=3, deflate=True)
+            finally:
+                doc.close()
+            os.replace(tmp, out)
+            written.append(out)
+        else:
+            os.makedirs(out, exist_ok=True)
+            for i, p in enumerate(paths):
+                step(i)
+                base = os.path.splitext(os.path.basename(p))[0] + ".pdf"
+                dest, k = os.path.join(out, base), 2
+                while os.path.exists(dest):
+                    dest = os.path.join(out, f"{os.path.splitext(base)[0]} ({k}).pdf")
+                    k += 1
+                to_pdf([p], dest, **opts)
+                written.append(dest)
+            step(n)
+    except BaseException:
+        for f in written + [out + ".part"]:
+            if ayri or f.endswith(".part"):
+                try:
+                    os.remove(f)
+                except OSError:
+                    pass
+        raise
+    return written
