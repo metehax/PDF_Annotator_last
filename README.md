@@ -198,9 +198,8 @@ bellekte bir PDF sayfasına çevrilir (EXIF yönü uygulanır); tüm araçlar
   uygulama kapatılırken Kaydet / Kaydetme / İptal sorulur. PDF, resim ya da
   proje olarak kaydetmek belgeyi "kaydedildi" sayar.
 * **Birlikte aç:** `main_window.py dosya.pdf` ile açılabilir; uygulama açıkken
-  yeni dosyalar mevcut pencereye gönderilir. Yardım menüsündeki
-  **Tercihler → Windows → Birlikte aç → Ekle…** yalnızca kullanıcı hesabınız için
-  kayıt yapar (HKCU), varsayılan uygulamanızı değiştirmez; aynı menüden kaldırılabilir.
+  yeni dosyalar mevcut pencereye gönderilir. **Düzenle → Tercihler → Windows → Birlikte aç → Ekle…** yalnızca kullanıcı hesabınız için
+  kayıt yapar (HKCU), varsayılan uygulamanızı değiştirmez; aynı yerden kaldırılabilir.
 * Pencere boyutu/konumu ve kenar paneli durumu bir sonraki açılışta hatırlanır.
 
 ## Yeni: Kişisel veri karartma (KVKK) ve damgalar
