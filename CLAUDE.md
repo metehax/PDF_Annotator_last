@@ -57,12 +57,14 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 - Heredoc ile `'''` içeren betik yazma (araç ayrıştırması bozuluyor): betiği Write ile dosyaya yaz, sonra çalıştır.
 
 ## Test
-- Testler repoda değil; geçici betikle: `QT_QPA_PLATFORM=windows .venv/Scripts/python test.py`.
+- Testler repoda: `tests/` (pytest). `tests/scripts/check_*.py` aşama denetim betikleridir (kendi süreçlerinde çalışır, `OK/FAIL` satırları + `OZET: a/b gecti` yazar); `tests/test_scripts.py` hepsini, `tests/test_lint.py` pyflakes'i çalıştırır.
+  Çalıştır: `$env:QT_QPA_PLATFORM="windows"; <venv>\Scripts\python -m pytest` (tek aşama: `-k qrshare`). Çıktıda yalnız `OZET`/`FAIL`'e bak. Yeni özellik = yeni `check_<ad>.py` (en yakın mevcut betikten kopyala: `ROOT`, `check()`, `pump()`, geçici ayar, `OZET`).
 - Pencereyi oluşturduktan hemen sonra `w.settings = QSettings(<geçici>.ini, IniFormat)` ve
   `w.stamp_lib.settings = w.settings` (+ `w.sig_lib`) — yoksa kullanıcının gerçek ayarları (son açılanlar) kirlenir.
-- Lint: `pip install pyflakes` → `python -m pyflakes ...` → işi bitince `pip uninstall -y pyflakes`.
+- Lint `tests/test_lint.py` içinde (pyflakes `requirements-dev.txt`'te).
 - Ekran görüntüsünü yalnızca aşama sonunda bir kez al (maliyet).
-- `.venv` başka bilgisayardan (OneDrive) gelmişse çalışmaz (pyvenv.cfg başka kullanıcı yolu): repoya dokunmadan geçici klasörde `py -3.12 -m venv` + `pip install -r requirements.txt pyflakes` ile test ortamı kur. Çıktı borulanırsa `python -u` kullan (`os._exit` tamponu yutar).
+- `.venv` başka bilgisayardan (OneDrive) gelmişse çalışmaz (pyvenv.cfg başka kullanıcı yolu): repoya dokunmadan geçici klasörde `py -3.12 -m venv` + `pip install -r requirements-dev.txt` ile test ortamı kur (aynı ortam sonraki aşamalarda yeniden kullanılır). Çıktı borulanırsa `python -u` kullan (`os._exit` tamponu yutar).
+- Satır sonu LF (`.gitattributes`; `.bat` CRLF). Dosyaları Write/Edit ile yazarken LF bırak.
 
 ## Yol haritası (kalan)
 B tamam (sayfa no/üstbilgi/Bates, sayfa kırpma, bulanıklaştırma, yapışkan not + yorumlar) ·
@@ -70,4 +72,5 @@ C1 tamam (form doldurma/sıfırlama/oluşturma, hesaplanan alan, Ctrl+P yazdırm
 C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğrulama) · E tamam (görsel iş akışı: adım zinciri + şablon + açık belge/dosyalar/klasör, ilerleme/durdurma/rapor) ·
 D1 tamam (iki sürümün metin farkı: yeşil/kırmızı vurgu, sayfa sayfa liste, listeden git) ·
 D2 tamam (Word/Excel dönüştürme, erişilebilirlik denetimi + tek tıkla düzeltme; pdf2docx ve openpyxl `requirements.txt`'te) ·
-F tamam (QR ile telefondan dosya alma + açık belgeyi telefona sunma; segno `requirements.txt`'te). Yol haritası bitti; yeni iş için kullanıcıdan yön al.
+F tamam (QR ile telefondan dosya alma + açık belgeyi telefona sunma; segno `requirements.txt`'te).
+**Sıradaki aşamalar (G1…K) ve her biri için hazır istem: `YOLHARITASI.md`** — yeni sohbette yalnızca ilgili aşama bölümünü oku.

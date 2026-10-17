@@ -1,0 +1,12 @@
+# Depoda ve çalışma klasöründe satır sonu LF (Windows'ta "LF will be replaced by CRLF" uyarısı çıkmaz)
+* text=auto eol=lf
+# Windows betikleri CRLF kalmalı
+*.bat text eol=crlf
+*.cmd text eol=crlf
+# İkili dosyalar dokunulmaz
+*.ttf binary
+*.traineddata binary
+*.png binary
+*.jpg binary
+*.pdf binary
+*.ico binary
