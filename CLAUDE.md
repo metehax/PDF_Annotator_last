@@ -6,7 +6,8 @@ PySide6 + PyMuPDF masaüstü PDF/resim işaretleme aracı (Windows). Kullanıcı
 ## Yapı
 | Dosya | Görev |
 |---|---|
-| `main_window.py` | `MainWindow` (bölünüyor: J1 bitti; J2'de mixin'ler `mw_*.py`): menüler, üst çubuk, yüzen araç kapsülü + özellik çubuğu, sol panel, durum çubuğu, tüm eylemler |
+| `main_window.py` | `MainWindow(…Mixin'ler, QMainWindow)`: arayüz kurulumu (menüler, üst çubuk, yüzen araç kapsülü + özellik çubuğu, sol panel, durum çubuğu), oturum/sekme, dosya açma-kaydetme-dışa aktarma, olay işleyicileri |
+| `mw_*.py` | `MainWindow` yöntem grupları (mixin; aynı `self`): `mw_compare` CompareMixin (metin farkı) · `mw_ocr` OcrMixin (OCR, taranmış sayfada metin düzenleme) · `mw_forms` FormsMixin (AcroForm) · `mw_sign` SignMixin (imza, dijital imza, damga) · `mw_doctools` DocToolsMixin (sıkıştır/parola/güvenlik/tarama/dönüştür/a11y/KVKK/iş akışı/üstbilgi/kırpma/yazdır) · `mw_pages` PagesMixin (sayfa işlemleri) · `mw_nav` NavMixin (küçük resim, içindekiler, yakınlaştırma, arama) · `mw_annot` AnnotMixin (işaret oluşturma/silme, numara, katmanlar) · `mw_notes` NotesMixin (notlar/yorumlar). Yeni yöntemi ilgili mixin'e yaz; birden çok yere ait ortak sabit gerekirse ayrı modüle koy (mixin `main_window`'dan içe aktarmaz: döngü) |
 | `views.py` | `PDFView` sürekli kaydırmalı görünüm (`PageItem`; işaretler sayfanın çocuk öğesi, koordinatlar sayfa pt), `ComparePane` |
 | `models.py` | Annotation sınıfları + `QUndoCommand`'lar, `DocumentSession` |
 | `pdf_engine.py` | `PDFDocument` (render, dışa aktarım `export_pdf(..., security, compress)`), filigran |
@@ -78,5 +79,5 @@ C2 tamam (elektronik imza + kütüphane, imza alanı, pyhanko dijital imza/doğr
 D1 tamam (iki sürümün metin farkı: yeşil/kırmızı vurgu, sayfa sayfa liste, listeden git) ·
 D2 tamam (Word/Excel dönüştürme, erişilebilirlik denetimi + tek tıkla düzeltme; pdf2docx ve openpyxl `requirements.txt`'te) ·
 F tamam (QR ile telefondan dosya alma + açık belgeyi telefona sunma; segno `requirements.txt`'te) ·
-G1 tamam (`scan.py` tarama çekirdeği; opencv-python-headless + numpy `requirements.txt`'te) · G2 tamam (`ui/scanner.py` tarayıcı penceresi: görsel/PDF kaynağı, köşe kulpları, filtre, OCR'lı PDF) · G3 tamam (telefon fotoğrafları → tarayıcı kuyruğu; Görselleri PDF'e çevir) · H1 tamam (iş akışı: `a11y_fix`, `to_word` + `check_workflow.py`) · H2 tamam (metin farkı HTML/PDF raporu) · J1 tamam (bağımsız diyaloglar `main_window.py`'dan `ui/`'a taşındı; davranış aynı).
+G1 tamam (`scan.py` tarama çekirdeği; opencv-python-headless + numpy `requirements.txt`'te) · G2 tamam (`ui/scanner.py` tarayıcı penceresi: görsel/PDF kaynağı, köşe kulpları, filtre, OCR'lı PDF) · G3 tamam (telefon fotoğrafları → tarayıcı kuyruğu; Görselleri PDF'e çevir) · H1 tamam (iş akışı: `a11y_fix`, `to_word` + `check_workflow.py`) · H2 tamam (metin farkı HTML/PDF raporu) · J1 tamam (bağımsız diyaloglar `main_window.py`'dan `ui/`'a taşındı; davranış aynı) · J2 tamam (yöntem grupları `mw_*.py` mixin'lerine taşındı; `main_window.py` 4166 → ~2230 satır).
 **Sıradaki aşamalar (G1…K) ve her biri için hazır istem: `YOLHARITASI.md`** — yeni sohbette yalnızca ilgili aşama bölümünü oku.
