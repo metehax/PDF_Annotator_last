@@ -114,6 +114,8 @@ class DocToolsMixin:
         s = self.active_session
         if not s:
             return
+        if not self._confirm_redactions(s):
+            return
         size = os.path.getsize(s.path) if os.path.exists(s.path) else 0
         dlg = CompressDialog(self, size)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -142,7 +144,7 @@ class DocToolsMixin:
         else:
             text = f"Kaydedildi: {docsec.human_size(new)}"
         self.status.setText(text)
-        self._toast_saved(text, path)
+        self._toast_saved(text, path, note="Özgün dosya değişmedi.")
 
     def open_password(self):
         s = self.active_session
@@ -316,7 +318,7 @@ class DocToolsMixin:
                              security=getattr(s, "security", None),
                              source_name=os.path.basename(s.path))
             self.status.setText(f"Kaydedildi: {path}")
-            self._toast_saved("PDF kaydedildi", path)
+            self._toast_saved("Kopya kaydedildi", path, note="Özgün dosya değişmedi.")
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 

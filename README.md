@@ -445,3 +445,19 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   yerel bağlantı noktasına yönlendirin. Sunucu yalnız `127.0.0.1`'de dinler ve **6 haneli PIN** ister (telefon önce PIN sayfasını görür); **5 yanlış denemede kilitlenir**
   (doğru PIN de kabul edilmez; *Kilidi aç* ya da *Yeni PIN*). Uygulama tünel servisiyle **kendisi bağlanmaz**; yalnızca adresi QR'a yazar. Dosyalar o servisten geçer.
   Güvenlik kuralları aynıdır (anahtarlı adres, yalnız PDF/resim, boyut/adet sınırı).
+
+## Yeni: Kullanılabilirlik iyileştirmeleri (I5b)
+* **Sayfa işlemleri geri alınabilir:** sayfa silme / ekleme / kopyalama / taşıma / döndürme artık **Ctrl+Z / Ctrl+Y** ile geri alınır (Geri al menüsü işlemi söyler,
+  ör. "Geri al 2. Sayfayı Sil"); işaret geçmişi sayfa işlemiyle silinmez. Taşıma sırasındaki bir sayfa-kayması hatası da düzeltildi.
+* **Kaydetme adları:** özgün dosya hiçbir yoldan değiştirilmediği için "Kaydet" yerine **Kopya olarak kaydet…** (Ctrl+S); üst düğme **Kopya kaydet**; "PDF olarak
+  kaydet…" **Dosya → Dışa aktar** altında; pencere başlığı ve bildirim "Özgün dosya değişmedi" der.
+* **Menüler gruplandı:** Belge menüsü 21 → 8 doğrudan öğe (**Sayfa ▸**, **Numara, üstbilgi ve filigran ▸**, **Dönüştür ve düzleştir ▸**, **Güvenlik ve gizlilik ▸**);
+  Dosya menüsü 20 → 12 (**Dışa aktar ▸**, **Paylaş ▸**, **Tara ve içe aktar ▸**, **Birleştir ve böl ▸**). Damga kütüphanesi İmza menüsüne taşındı. Ctrl+K komut paleti hepsini bulur.
+* **Durum çubuğu:** mesajlar birkaç saniye sonra kalıcı metne döner (belge yokken yönerge, varken seçili aracın kısa açıklaması ve harf kısayolu); belge/araç
+  değişince bayat mesaj temizlenir.
+* **Sansür:** kutuya yazdığınız **etiket ekranda da görünür** (düzenlerken soluk, "Nihai görünüm"de tam); özellik çubuğunda görünür uyarı ("Kaydedince altındaki metin
+  silinir"); kaydetmeden önce **özet** ("2 sansür kutusu (2 sayfada) uygulanacak" — *Kaydet / Nihai görünüme bak / İptal*, "Bir daha sorma" seçeneği).
+* **Kısayollar:** işaretler için **Ctrl+C / Ctrl+X / Ctrl+V** (yapıştırma biraz kayık, tek adımda geri alınır) ve **Ctrl+A** (sayfadaki tüm işaretler); **Ctrl+Shift+Z**
+  (yinele), **F11** tam ekran, **Ctrl+Tab / Ctrl+Shift+Tab** belge sekmeleri. Birden çok seçili işareti silme artık hepsini siler (önceden yalnız ilkini siliyordu).
+* **Özellik çubuğu** artık sayfanın ilk satırlarını örtmez (tuval çubuğun altından başlar). **Belge tara** penceresi: filtre kartları 3×2 ve iç kaydırmasız, "Bu sayfayı sıfırla"
+  üst çubukta her zaman görünür, **DÜZELTME** bölümü katlanır, pencere ekrana göre boyutlanır.

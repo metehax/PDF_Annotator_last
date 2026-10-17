@@ -32,7 +32,7 @@ import forms
 from ui.formui import FormsPanel
 from ui.redactopts import RedactOptions
 from ui.sidepanel import SidePanel
-from ui.widgets import ThumbnailDelegate
+from ui.widgets import StatusMessage, ThumbnailDelegate
 from ui.ocrdialog import _OcrTask
 from mw_common import CANVAS_TOP_INSET, TOOLS, TOOL_KEYS, TOOL_NAMES
 
@@ -188,28 +188,31 @@ class BuildMixin:
         A(m_file, "open", "Aç…", self.open_pdf, "Ctrl+O", needs_doc=False)
         self.recent_menu = m_file.addMenu(icon("reset"), "Son açılanlar")
         m_file.addSeparator()
-        A(m_file, "save", "Kaydet", self.save_document, "Ctrl+S")
-        A(m_file, "file", "PDF olarak kaydet…", self.save_pdf, "Ctrl+Shift+S")
-        A(m_file, "compress", "Sıkıştırarak kaydet…", self.save_compressed)
-        A(m_file, "image", "Resim olarak kaydet…", self.save_as_image)
-        A(m_file, "watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark)
+        A(m_file, "save", "Kopya olarak kaydet…", self.save_document, "Ctrl+S")
         m_exp = m_file.addMenu(icon("download"), "Dışa aktar")
         self._doc_controls.append(m_exp.menuAction())
+        A(m_exp, "file", "PDF olarak kaydet…", self.save_pdf, "Ctrl+Shift+S")
+        A(m_exp, "compress", "Sıkıştırarak kaydet…", self.save_compressed)
+        A(m_exp, "image", "Resim olarak kaydet…", self.save_as_image)
+        A(m_exp, "watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark)
+        m_exp.addSeparator()
         A(m_exp, "image", "Bu sayfayı PNG", lambda: self.export_image_current("png"))
         A(m_exp, "image", "Bu sayfayı JPEG", lambda: self.export_image_current("jpg"))
         A(m_exp, "images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
-        m_file.addSeparator()
-        A(m_file, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
         m_share = m_file.addMenu(icon("download"), "Paylaş")
         self._doc_controls.append(m_share.menuAction())
         A(m_share, "file", "E-postayla gönder…", self.share_email)
         A(m_share, "folder", "Bulut klasörüne kaydet…", self.share_cloud)
         A(m_share, "folder", "Dosya konumunu aç", self.share_reveal)
-        A(m_file, "scan", "Belge tara (görsellerden)…", self.scan_images, needs_doc=False)
-        A(m_file, "images", "Görselleri PDF'e çevir…", self.images_to_pdf, needs_doc=False)
-        A(m_file, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
-        A(m_file, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
-        A(m_file, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
+        m_file.addSeparator()
+        m_in = m_file.addMenu(icon("scan"), "Tara ve içe aktar")
+        A(m_in, "scan", "Belge tara (görsellerden)…", self.scan_images, needs_doc=False)
+        A(m_in, "images", "Görselleri PDF'e çevir…", self.images_to_pdf, needs_doc=False)
+        A(m_in, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
+        m_split = m_file.addMenu(icon("merge"), "Birleştir ve böl")
+        A(m_split, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
+        A(m_split, "images", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
+        A(m_split, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
         m_file.addSeparator()
         A(m_file, "printer", "Yazdır…", self.print_document, "Ctrl+P")
         m_file.addSeparator()
@@ -225,12 +228,17 @@ class BuildMixin:
         self.act_undo.setShortcut(QKeySequence.StandardKey.Undo)
         self.act_undo.setIcon(icon("undo"))
         self.act_redo = self.undo_group.createRedoAction(self, "Yinele")
-        self.act_redo.setShortcut(QKeySequence.StandardKey.Redo)
+        self.act_redo.setShortcuts([QKeySequence("Ctrl+Y"), QKeySequence("Ctrl+Shift+Z")])
         self.act_redo.setIcon(icon("redo"))
         self.addAction(self.act_undo)
         self.addAction(self.act_redo)
         m_edit.addAction(self.act_undo)
         m_edit.addAction(self.act_redo)
+        m_edit.addSeparator()
+        A(m_edit, "copy", "Kopyala", self.copy_selected, QKeySequence.StandardKey.Copy)
+        A(m_edit, "scissors", "Kes", self.cut_selected, QKeySequence.StandardKey.Cut)
+        A(m_edit, "clipboard", "Yapıştır", self.paste_annotations, QKeySequence.StandardKey.Paste)
+        A(m_edit, "select", "Sayfadaki tüm işaretleri seç", self.select_all_annotations, QKeySequence.StandardKey.SelectAll)
         m_edit.addSeparator()
         A(m_edit, "trash", "Seçileni sil", self.delete_selected, QKeySequence.StandardKey.Delete)
         m_edit.addSeparator()
@@ -245,6 +253,9 @@ class BuildMixin:
         A(m_view, "fit_width", "Genişliğe sığdır", self.fit_width, "Ctrl+2")
         A(m_view, "fit_page", "Tam sayfa", self.fit_page, "Ctrl+0")
         m_view.addSeparator()
+        A(m_view, "fit_page", "Tam ekran", self.toggle_fullscreen, "F11", needs_doc=False)
+        A(m_view, "chevron_right", "Sonraki belge sekmesi", lambda: self._cycle_tab(1), "Ctrl+Tab", needs_doc=False)
+        A(m_view, "chevron_left", "Önceki belge sekmesi", lambda: self._cycle_tab(-1), "Ctrl+Shift+Tab", needs_doc=False)
         A(m_view, "grid", "Kenar paneli", self._toggle_side_panel, "Ctrl+B", needs_doc=False)
         A(m_view, "comment", "Yorumlar paneli", self._show_comments_panel, "Ctrl+Shift+M")
         self.act_night = A(m_view, "contrast", "Gece modu", self.toggle_night_mode, checkable=True)
@@ -260,33 +271,38 @@ class BuildMixin:
         A(m_view, "moon", "Açık / koyu tema", self.toggle_theme, "Ctrl+Shift+L", needs_doc=False)
 
         m_doc = QMenu("Belge", self)
-        A(m_doc, "file_plus", "Sonrasına boş sayfa ekle", lambda: self._insert_blank_page(page() + 1))
-        A(m_doc, "file_copy", "Sayfayı kopyala", lambda: self._duplicate_page(page()))
-        A(m_doc, "trash", "Sayfayı sil", lambda: self._delete_page(page()))
-        m_doc.addSeparator()
-        A(m_doc, "rotate_cw", "Saat yönünde döndür", lambda: self._rotate_current_page(90), "Ctrl+R")
-        A(m_doc, "rotate_ccw", "Saatin tersine döndür", lambda: self._rotate_current_page(-90),
+        m_pg = m_doc.addMenu(icon("file_plus"), "Sayfa")
+        self._doc_controls.append(m_pg.menuAction())
+        A(m_pg, "file_plus", "Sonrasına boş sayfa ekle", lambda: self._insert_blank_page(page() + 1))
+        A(m_pg, "file_copy", "Sayfayı kopyala", lambda: self._duplicate_page(page()))
+        A(m_pg, "trash", "Sayfayı sil", lambda: self._delete_page(page()))
+        m_pg.addSeparator()
+        A(m_pg, "rotate_cw", "Saat yönünde döndür", lambda: self._rotate_current_page(90), "Ctrl+R")
+        A(m_pg, "rotate_ccw", "Saatin tersine döndür", lambda: self._rotate_current_page(-90),
           "Ctrl+Shift+R")
-        m_doc.addSeparator()
-        A(m_doc, "crop", "Sayfaları kırp…", self.open_crop_pages)
-        A(m_doc, "headfoot", "Sayfa numarası, üstbilgi ve altbilgi…",
+        m_pg.addSeparator()
+        A(m_pg, "crop", "Sayfaları kırp…", self.open_crop_pages)
+        m_hf = m_doc.addMenu(icon("headfoot"), "Numara, üstbilgi ve filigran")
+        self._doc_controls.append(m_hf.menuAction())
+        A(m_hf, "headfoot", "Sayfa numarası, üstbilgi ve altbilgi…",
           lambda: self.save_pdf_with_headfoot(False))
-        A(m_doc, "headfoot", "Bates numaralandır…", lambda: self.save_pdf_with_headfoot(True))
-        m_doc.addSeparator()
+        A(m_hf, "number", "Bates numaralandır…", lambda: self.save_pdf_with_headfoot(True))
+        A(m_hf, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
         A(m_doc, "ocr", "OCR (metin tanıma)…", self.open_ocr_dialog)
-        A(m_doc, "watermark", "Filigran ekle…", self.save_pdf_with_watermark)
+        m_cv = m_doc.addMenu(icon("download"), "Dönüştür ve düzleştir")
+        self._doc_controls.append(m_cv.menuAction())
+        A(m_cv, "download", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
+        A(m_cv, "calc", "Excel'e dönüştür (tablolar, .xlsx)…", lambda: self.open_convert("xlsx"))
+        A(m_cv, "layers", "Düzleştir ve kaydet…", self.open_flatten)
+        A(m_cv, "scan", "Bu belgeyi tara/kırp…", self.scan_document)
+        m_sec = m_doc.addMenu(icon("lock"), "Güvenlik ve gizlilik")
+        self._doc_controls.append(m_sec.menuAction())
+        A(m_sec, "lock", "Parola koruması…", self.open_password)
+        A(m_sec, "shield", "Güvenlik denetimi…", self.open_security_check)
+        A(m_sec, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
         m_doc.addSeparator()
         A(m_doc, "info", "Belge bilgileri…", self.open_doc_info, "Ctrl+D")
-        A(m_doc, "lock", "Parola koruması…", self.open_password)
-        A(m_doc, "shield", "Güvenlik denetimi…", self.open_security_check)
-        A(m_doc, "scan", "Bu belgeyi tara/kırp…", self.scan_document)
-        A(m_doc, "layers", "Düzleştir ve kaydet…", self.open_flatten)
         A(m_doc, "eye", "Erişilebilirlik denetimi…", self.open_a11y)
-        A(m_doc, "download", "Word'e dönüştür (.docx)…", lambda: self.open_convert("docx"))
-        A(m_doc, "calc", "Excel'e dönüştür (tablolar, .xlsx)…", lambda: self.open_convert("xlsx"))
-        A(m_doc, "privacy", "Kişisel verileri bul ve karart (KVKK)…", self.open_kvkk, "Ctrl+Shift+K")
-        A(m_doc, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
-        m_doc.addSeparator()
         A(m_doc, "workflow", "Görsel iş akışı (adım zinciri)…", self.open_workflow, "Ctrl+Shift+W", needs_doc=False)
 
         m_form = QMenu("Form", self)
@@ -303,6 +319,7 @@ class BuildMixin:
         m_sign = QMenu("İmza", self)
         A(m_sign, "sign", "İmza bas (araç)", lambda: self._tool_shortcut("sign"))
         A(m_sign, "plus", "Yeni elektronik imza…", self.new_signature, needs_doc=False)
+        A(m_sign, "stamp", "Damga kütüphanesi…", self.open_stamp_library, needs_doc=False)
         A(m_sign, "form", "İmza alanı oluştur", self.start_signature_field)
         m_sign.addSeparator()
         A(m_sign, "lock", "Dijital olarak imzala (.pfx)…", self.sign_digitally)
@@ -321,7 +338,7 @@ class BuildMixin:
         # sağ üstteki "Dışa Aktar" düğmesinin menüsü
         self.export_menu = QMenu(self)
         for entry in (
-            ("file", "PDF olarak kaydet", self.save_pdf),
+            ("file", "PDF olarak kaydet…", self.save_pdf),
             ("compress", "Sıkıştırarak kaydet…", self.save_compressed),
             ("image", "Resim olarak kaydet (orijinal çözünürlük)", self.save_as_image),
             ("watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark),
@@ -404,10 +421,10 @@ class BuildMixin:
         h.addWidget(self.btn_export)
         h.addSpacing(4)
 
-        self.btn_save = QPushButton(icon("save", "on_accent"), "Kaydet")
+        self.btn_save = QPushButton(icon("save", "on_accent"), "Kopya kaydet")
         self.btn_save.setObjectName("primary")
         self.btn_save.setIconSize(QSize(18, 18))
-        self.btn_save.setToolTip("Kaydet (Ctrl+S)")
+        self.btn_save.setToolTip("İşaretli kopyayı yeni dosya olarak kaydeder; özgün dosya değişmez (Ctrl+S)")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(self.save_document)
         h.addWidget(self.btn_save)
@@ -641,7 +658,7 @@ class BuildMixin:
         h.setContentsMargins(14, 0, 8, 0)
         h.setSpacing(2)
 
-        self.status = QLabel("Başlamak için bir dosya açın ya da pencereye sürükleyin.")
+        self.status = StatusMessage(self._status_default)
         self.status.setObjectName("status")
         # uzun yollar sağdaki kontrolleri itmesin: sığmayan kısım kırpılır
         self.status.setSizePolicy(QSizePolicy.Policy.Ignored, QSizePolicy.Policy.Preferred)
@@ -859,10 +876,13 @@ class BuildMixin:
         self.chk_redact_final.setToolTip("Yalnız ekrandaki görünümü değiştirir; dışa aktarılan PDF her zaman tam dolgudur.")
         self.chk_redact_final.setChecked(RedactionAnnotation.final_view)
         self.chk_redact_final.toggled.connect(self.set_redact_final_view)
+        redact_warn = QLabel("Kaydedince altındaki metin silinir")
+        redact_warn.setObjectName("redactWarn")
         self.prop_stack.addWidget(page(
             self.redact_opts,
             self._color_row("Özel renk", "redact_color"),
             self.chk_redact_final,
+            redact_warn,
             self._hint("Kaydedince altındaki metin ve resim PDF'ten KALICI silinir. Düzenlerken kutu "
                        "yumuşak (yarı saydam) görünür; çıktıda tam dolgudur. Dikkatli çizin.", warn=True),
         ))

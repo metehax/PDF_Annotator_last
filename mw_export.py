@@ -12,7 +12,9 @@ import os
 
 import pymupdf as fitz
 
-from PySide6.QtWidgets import QDialog, QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QCheckBox, QDialog, QFileDialog, QInputDialog, QMessageBox
+
+from models import RedactionAnnotation
 
 from pdf_engine import (
     IMAGE_EXTS, image_to_pdf_document, is_image_path, save_project_json, load_project_json,
@@ -66,12 +68,48 @@ class ExportMixin:
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 
+    def _ask_redaction_summary(self, n: int, pages: int) -> str:
+        """"save" | "final" | "cancel" (testlerde bu yöntem örnek üzerinde değiştirilir)."""
+        box = QMessageBox(self)
+        box.setIcon(QMessageBox.Icon.Warning)
+        box.setWindowTitle("Sansür uygulanacak")
+        box.setText(f"<b>{n} sansür kutusu ({pages} sayfada)</b> kopyaya uygulanacak.")
+        box.setInformativeText("Altındaki metin ve resim kopyadan KALICI olarak silinir (özgün dosya değişmez). "
+                               "Ekranda yarı saydam görünen kutular çıktıda tam dolgu olur.")
+        again = QCheckBox("Bir daha sorma")
+        box.setCheckBox(again)
+        b_save = box.addButton("Kaydet", QMessageBox.ButtonRole.AcceptRole)
+        b_final = box.addButton("Nihai görünüme bak", QMessageBox.ButtonRole.ActionRole)
+        box.addButton("İptal", QMessageBox.ButtonRole.RejectRole)
+        box.setDefaultButton(b_save)
+        box.exec()
+        c = box.clickedButton()
+        if c is b_save:
+            if again.isChecked():
+                self.settings.setValue("redactConfirmOff", True)
+            return "save"
+        return "final" if c is b_final else "cancel"
+
+    def _confirm_redactions(self, s) -> bool:
+        """Kaydetmeden önce sansür özeti: kaç kutu, kaç sayfa; "Nihai görünüme bak" ekranı çıktıdaki gibi gösterir."""
+        boxes = [(p, a) for p, lst in s.annotations.items() for a in lst
+                 if isinstance(a, RedactionAnnotation) and not a.quiet]
+        if not boxes or str(self.settings.value("redactConfirmOff", "false")).lower() == "true":
+            return True
+        choice = self._ask_redaction_summary(len(boxes), len({p for p, _ in boxes}))
+        if choice == "final":
+            self.set_redact_final_view(True)
+            self.toasts.show("Nihai görünüm açıldı: kutuları kontrol edip tekrar kaydedin.", "info")
+        return choice == "save"
+
     def save_pdf(self):
         s = self.active_session
         if not s:
             return
+        if not self._confirm_redactions(s):
+            return
         default = os.path.splitext(s.path)[0] + "_isaretli.pdf"
-        path, _ = QFileDialog.getSaveFileName(self, "PDF Olarak Kaydet", default, "PDF (*.pdf)")
+        path, _ = QFileDialog.getSaveFileName(self, "Kopya Olarak Kaydet (özgün dosya değişmez)", default, "PDF (*.pdf)")
         if not path:
             return
         if not path.lower().endswith(".pdf"):
@@ -80,13 +118,15 @@ class ExportMixin:
             s.pdf.export_pdf(path, s.annotations, self.font_ctx, security=getattr(s, "security", None))
             self.status.setText(f"Kaydedildi: {path}")
             self._mark_saved(s)
-            self._toast_saved("PDF kaydedildi", path)
+            self._toast_saved("Kopya kaydedildi", path, note="Özgün dosya değişmedi.")
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 
     def save_pdf_with_watermark(self):
         s = self.active_session
         if not s:
+            return
+        if not self._confirm_redactions(s):
             return
         dlg = WatermarkDialog(self.state.watermark, s.pdf.page_count, s.current_page, self)
         if dlg.exec() != QDialog.DialogCode.Accepted:
@@ -103,7 +143,7 @@ class ExportMixin:
             s.pdf.export_pdf(path, s.annotations, self.font_ctx, watermark=cfg,
                              security=getattr(s, "security", None))
             self.status.setText(f"Filigranlı PDF kaydedildi: {path}")
-            self._toast_saved("Filigranlı PDF kaydedildi", path)
+            self._toast_saved("Filigranlı kopya kaydedildi", path, note="Özgün dosya değişmedi.")
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
 

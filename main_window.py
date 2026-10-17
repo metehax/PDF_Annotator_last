@@ -252,6 +252,7 @@ class MainWindow(
                 and not self.act_compare.isChecked() and tool in self._tool_pages)
         if not show:
             self.prop_bar.hide()
+            self._set_canvas_inset(CANVAS_TOP_INSET)
             return
         cur = self._tool_pages[tool]
         # QStackedWidget en geniş sayfaya göre boyutlanır; yalnızca aktif sayfa sayılsın
@@ -266,6 +267,14 @@ class MainWindow(
                            self.capsule.y() + self.capsule.height() + 8)
         self.prop_bar.show()
         self.prop_bar.raise_()
+        self._set_canvas_inset(self.prop_bar.geometry().bottom() + 8)      # sayfa, özellik çubuğunun altından başlasın
+
+    def _set_canvas_inset(self, px: int):
+        """Çizim alanının üst boşluğu: yüzen çubukların sayfanın ilk satırlarını örtmemesi için çubuk yüksekliğine uyar."""
+        px = max(CANVAS_TOP_INSET, int(px))
+        if getattr(self, "_canvas_inset", None) != px:
+            self._canvas_inset = px
+            self.view.setViewportMargins(0, px, 0, 0)
 
     def _to_workspace(self, scene_pt):
         vp = self.view.mapFromScene(scene_pt)
@@ -348,7 +357,32 @@ class MainWindow(
         self._hover_page = -1
         self.page_bar.hide()
 
-    def _toast_saved(self, text, path, folder=False):
+    def toggle_fullscreen(self):
+        """F11: tam ekran aç/kapat."""
+        if self.isFullScreen():
+            self.showNormal()
+        else:
+            self.showFullScreen()
+
+    def _cycle_tab(self, step: int):
+        """Ctrl+Tab / Ctrl+Shift+Tab: açık belgeler arasında dolaş."""
+        n = len(self.sessions)
+        if n > 1:
+            self.switch_session((self.doc_tabbar.currentIndex() + step) % n)
+
+    def _status_default(self) -> str:
+        """Durum çubuğunun kalıcı metni: belge yokken yönerge, varken seçili aracın kısa açıklaması."""
+        if not getattr(self, "sessions", None):
+            return "Başlamak için bir dosya açın ya da pencereye sürükleyin."
+        if getattr(self, "act_compare", None) is not None and self.act_compare.isChecked():
+            return "Karşılaştırma modu · salt okunur"
+        tool = self.state.tool
+        for t in TOOLS:
+            if t and t[0] == tool:
+                return f"{t[1]} · {t[3]} ({TOOL_KEYS[tool]})"
+        return ""
+
+    def _toast_saved(self, text, path, folder=False, note=""):
         target = path if folder else os.path.dirname(os.path.abspath(path))
 
         def reveal():
@@ -358,8 +392,9 @@ class MainWindow(
             else:
                 QDesktopServices.openUrl(QUrl.fromLocalFile(target))
 
-        self.toasts.show(f"{text}<br><span style='color:gray'>{os.path.basename(path) or path}</span>",
-                         "success", action=("Klasörde göster", reveal))
+        extra = f"<br><span style='color:gray'>{note}</span>" if note else ""
+        self.toasts.show(f"{text}<br><span style='color:gray'>{os.path.basename(path) or path}</span>{extra}",
+                         "success", action=("Klasörde göster", reveal), timeout_ms=6000 if note else 3200)
 
     # -- araç kısayolları / komut paleti ----------------------------------------
     def _tool_shortcut(self, key):
@@ -646,6 +681,7 @@ class MainWindow(
         if tool != "select":
             self._sel_ann = None
             self._hover_page = -1
+        self.status.reset()
         self._update_prop_bar()
         self._place_floating()
         if tool == "number":
@@ -785,6 +821,7 @@ class MainWindow(
 
     def switch_session(self, idx):
         self.active_session = self.sessions[idx]
+        self.status.reset()
         self.undo_group.setActiveStack(self.active_session.undo_stack)
         self._build_thumbnails()
         self._build_toc()

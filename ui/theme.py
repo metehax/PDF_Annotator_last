@@ -283,6 +283,7 @@ QSplitter::handle {{ background:{t['border']}; }}
     padding:2px 2px 4px 2px; }}
 #propPage {{ background:{t['surface']}; }}
 #propTitle {{ color:{t['text']}; font-size:14px; font-weight:600; }}
+QLabel#redactWarn {{ color:{t['warning']}; font-weight:600; }}
 QLabel#scanCanvas {{ background:{t['canvas']}; color:{t['text_faint']}; border-radius:8px; }}
 QListWidget#scanFilters::item, QListWidget#scanStrip::item {{ padding:3px; }}
 QListWidget#scanFilters::item:selected, QListWidget#scanStrip::item:selected {{ background:{t['accent_soft']}; border:1px solid {t['accent']}; }}

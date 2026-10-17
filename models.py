@@ -489,10 +489,19 @@ class RedactItem(QGraphicsRectItem):
     SOFT_ALPHA = 140            # ~%55
     RADIUS = 3.0
 
-    def __init__(self, rect: QRectF, fill_color: QColor, quiet: bool = False):
+    def __init__(self, rect: QRectF, fill_color: QColor, quiet: bool = False, label: str = ""):
         super().__init__(rect)
         self.fill_color = QColor(fill_color)
         self.quiet = bool(quiet)
+        self.label = str(label or "").strip()
+
+    def label_color(self, alpha: int = 255) -> QColor:
+        """Etiket rengi: koyu dolguda beyaz, açık dolguda siyah (çıktıdaki `draw_label` ile aynı kural)."""
+        c = self.fill_color
+        lum = (0.299 * c.red() + 0.587 * c.green() + 0.114 * c.blue()) / 255.0
+        out = QColor(255, 255, 255) if lum < 0.5 else QColor(0, 0, 0)
+        out.setAlpha(alpha)
+        return out
 
     def appearance(self) -> tuple:
         """(dolgu alfa 0-255, kenar var mı, köşe yarıçapı) — geçerli bayrağa göre."""
@@ -523,6 +532,15 @@ class RedactItem(QGraphicsRectItem):
             painter.drawRoundedRect(r, radius, radius)
         else:
             painter.drawRect(r)
+        if self.label and not self.quiet and r.width() > 12 and r.height() > 6:
+            # etiket ekranda da görünsün (düzenlerken soluk, nihai görünümde tam); sığmazsa çıktıda da yazılmaz
+            f = QFont(painter.font())
+            size = min(14.0, r.height() * 0.6)
+            f.setPixelSize(max(4, int(size)))
+            painter.setFont(f)
+            if painter.fontMetrics().horizontalAdvance(self.label) <= r.width() - 4:
+                painter.setPen(QPen(self.label_color(255 if alpha >= 255 else 190)))
+                painter.drawText(r, Qt.AlignmentFlag.AlignCenter, self.label)
 
 
 @_register("redaction")
@@ -541,7 +559,7 @@ class RedactionAnnotation(Annotation):
         self.label = str(label or "")           # kutunun üstüne yazılan metin ("GİZLİ", "[KARARTILDI]"…)
 
     def create_item(self) -> QGraphicsItem:
-        return RedactItem(self.rect, self.fill_color, self.quiet)
+        return RedactItem(self.rect, self.fill_color, self.quiet, self.label)
 
     def apply_to_page(self, page, font_ctx) -> None:
         r = fitz.Rect(self.rect.left(), self.rect.top(), self.rect.right(), self.rect.bottom())
@@ -1178,6 +1196,44 @@ class CropPagesCommand(QUndoCommand):
                 ann.translate(vis.x0, vis.y0)
         if self.on_done:
             self.on_done()
+
+
+class PageStructureCommand(QUndoCommand):
+    """Sayfa yapısı işlemi (sil / ekle / çoğalt / taşı / döndür) için geri alınabilir komut.
+
+    `do_doc()` ve `undo_doc()` belgeyi (PDFDocument) değiştirir; `after_ann` işlem sonrası işaret sözlüğüdür
+    (sayfa -> işaret listesi), işlem öncesi sözlük kurucuda saklanır. Geri alma sırası ters (LIFO) olduğundan
+    aralarındaki işaret komutları önce geri alınır ve liste nesneleri tutarlı kalır. `after_rot`/`before_rot`:
+    oturumun sayfa döndürme kaydı. `on_change(session, hedef_sayfa)` arayüzü tazeler."""
+
+    def __init__(self, session: "DocumentSession", label: str, do_doc: Callable[[], None],
+                 undo_doc: Callable[[], None], after_ann: Dict[int, list],
+                 on_change: Optional[Callable[["DocumentSession", int], None]] = None,
+                 target_after: int = 0, target_before: int = 0,
+                 after_rot: Optional[Dict[int, int]] = None):
+        super().__init__(label)
+        self.session = session
+        self.do_doc, self.undo_doc = do_doc, undo_doc
+        self.before_ann = dict(session.annotations)
+        self.after_ann = dict(after_ann)
+        self.before_rot = dict(session.rotations)
+        self.after_rot = dict(session.rotations if after_rot is None else after_rot)
+        self.on_change = on_change
+        self.target_after, self.target_before = target_after, target_before
+
+    def redo(self):
+        self.do_doc()
+        self.session.annotations = dict(self.after_ann)
+        self.session.rotations = dict(self.after_rot)
+        if self.on_change:
+            self.on_change(self.session, self.target_after)
+
+    def undo(self):
+        self.undo_doc()
+        self.session.annotations = dict(self.before_ann)
+        self.session.rotations = dict(self.before_rot)
+        if self.on_change:
+            self.on_change(self.session, self.target_before)
 
 
 class FormValuesCommand(QUndoCommand):

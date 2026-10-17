@@ -6,14 +6,44 @@ Tema ile uyumlu küçük, yeniden kullanılabilir arayüz parçaları.
 
 from __future__ import annotations
 
-from PySide6.QtCore import QRectF, QSize, Qt
+from typing import Callable
+
+from PySide6.QtCore import QRectF, QSize, Qt, QTimer
 from PySide6.QtGui import QColor, QPainter, QPen, QPixmap
-from PySide6.QtWidgets import QStyle, QStyledItemDelegate
+from PySide6.QtWidgets import QLabel, QStyle, QStyledItemDelegate
 
 from ui import theme
 
 THUMB_ROLE = Qt.ItemDataRole.UserRole + 2     # QPixmap (yoksa boş kâğıt çizilir)
 THUMB_ASPECT_ROLE = Qt.ItemDataRole.UserRole + 3  # yükseklik / genişlik
+
+
+class StatusMessage(QLabel):
+    """Durum çubuğu metni: `setText` ile yazılan mesaj kısa süre (`timeout_ms`) görünür, sonra `default()` metnine
+    döner (bayat "Tüm belgeler kapatıldı." gibi mesajlar kalmasın). `reset()` hemen varsayılana döner."""
+
+    def __init__(self, default: Callable[[], str], timeout_ms: int = 6000, parent=None):
+        super().__init__(default(), parent)
+        self._default = default
+        self._timer = QTimer(self)
+        self._timer.setSingleShot(True)
+        self._timer.setInterval(timeout_ms)
+        self._timer.timeout.connect(self.reset)
+
+    def setText(self, text: str) -> None:
+        super().setText(text)
+        if text and text != self._default():
+            self._timer.start()
+        else:
+            self._timer.stop()
+
+    def reset(self) -> None:
+        self._timer.stop()
+        super().setText(self._default())
+
+    @property
+    def transient_active(self) -> bool:
+        return self._timer.isActive()
 
 
 class ThumbnailDelegate(QStyledItemDelegate):

@@ -9,6 +9,8 @@ MainWindow bu mixin'i miras alır; yöntemler `self` üzerinden ana pencerenin d
 from __future__ import annotations
 
 
+import uuid
+
 import pymupdf as fitz
 
 from PySide6.QtCore import QPointF, QRectF, QSize, Qt
@@ -19,7 +21,7 @@ from PySide6.QtWidgets import (
 )
 
 from models import (
-    AddAnnotationCommand, BlurAnnotation, HighlightAnnotation, ImageAnnotation, InkAnnotation,
+    Annotation, AddAnnotationCommand, BlurAnnotation, HighlightAnnotation, ImageAnnotation, InkAnnotation,
     LineAnnotation, MoveAnnotationCommand, NoteAnnotation, NumberAnnotation, RedactionAnnotation,
     RemoveAnnotationCommand, ResizeAnnotationCommand, ShapeAnnotation, TextAnnotation,
     ZOrderCommand, number_to_color,
@@ -325,11 +327,79 @@ class AnnotMixin:
         s.undo_stack.push(cmd)
         self.status.setText("Öge silindi.")
 
-    def delete_selected(self):
-        for gitem in list(self.view.scene_obj.selectedItems()):
+    # -- kopyala / kes / yapıştır / tümünü seç ----------------------------------------
+    def _selected_pairs(self):
+        """Seçili işaretler: [(sayfa, işaret)] (yönlendirme tutamacı hariç)."""
+        out = []
+        for gitem in self.view.scene_obj.selectedItems():
             if gitem is self.view.gizmo:
                 continue
-            self._delete_item(gitem)
+            ann = self.view.item_ann_map.get(gitem)
+            if ann is not None:
+                page = self.view.page_of_item(gitem)
+                out.append((self.active_session.current_page if page is None else page, ann))
+        return out
+
+    def copy_selected(self) -> int:
+        """Seçili işaretleri iç panoya kopyalar (Ctrl+C); kopyalanan sayıyı döndürür."""
+        if not self.active_session:
+            return 0
+        pairs = self._selected_pairs()
+        self._ann_clipboard = [ann.to_dict() for _, ann in pairs]
+        self._paste_count = 0
+        if pairs:
+            self.status.setText(f"{len(pairs)} işaret kopyalandı (Ctrl+V ile yapıştırın).")
+        return len(pairs)
+
+    def cut_selected(self) -> int:
+        n = self.copy_selected()
+        if n:
+            self.delete_selected()
+        return n
+
+    def paste_annotations(self) -> int:
+        """Panodaki işaretleri geçerli sayfaya yapıştırır (her yapıştırmada biraz kayık); tek adımda geri alınır."""
+        s = self.active_session
+        clip = getattr(self, "_ann_clipboard", None)
+        if not s or not clip:
+            return 0
+        self._paste_count = getattr(self, "_paste_count", 0) + 1
+        off = 14.0 * self._paste_count
+        s.undo_stack.beginMacro(f"{len(clip)} işareti yapıştır")
+        for d in clip:
+            new = Annotation.from_dict(dict(d))
+            new.uid = uuid.uuid4().hex
+            new.translate(off, off)
+            s.undo_stack.push(AddAnnotationCommand(s, s.current_page, new, on_change=self._on_session_change,
+                                                   label="İşaret Yapıştır"))
+        s.undo_stack.endMacro()
+        self.status.setText(f"{len(clip)} işaret yapıştırıldı.")
+        return len(clip)
+
+    def select_all_annotations(self) -> int:
+        """Geçerli sayfadaki tüm işaretleri seçer (Ctrl+A)."""
+        s = self.active_session
+        if not s:
+            return 0
+        n = 0
+        for gitem, ann in list(self.view.item_ann_map.items()):
+            if self.view.page_of_item(gitem) == s.current_page:
+                gitem.setSelected(True)
+                n += 1
+        return n
+
+    def delete_selected(self):
+        """Seçili işaretleri siler. Önce işaretler toplanır: ilk silme sayfayı yeniden çizip sahne öğelerini yenilediği için
+        öğe öğe silmek yalnız ilkini silerdi. Tek geri alma adımıdır."""
+        s = self.active_session
+        pairs = self._selected_pairs() if s else []
+        if not pairs:
+            return
+        s.undo_stack.beginMacro(f"{len(pairs)} işareti sil")
+        for page, ann in pairs:
+            s.undo_stack.push(RemoveAnnotationCommand(s, page, ann, on_change=self._on_session_change))
+        s.undo_stack.endMacro()
+        self.status.setText("Öge silindi." if len(pairs) == 1 else f"{len(pairs)} öge silindi.")
 
     def show_item_context_menu(self, gitem, global_pos):
         if gitem is None or gitem not in self.view.item_ann_map:

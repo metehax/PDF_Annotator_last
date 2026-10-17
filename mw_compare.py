@@ -21,6 +21,7 @@ class CompareMixin:
     # Karşılaştırma modu
     # =====================================================================
     def toggle_compare_mode(self, checked):
+        self.status.reset()
         self.canvas_stack.setCurrentIndex(1 if checked else 0)
         for key, b in self._tool_buttons:
             if checked:

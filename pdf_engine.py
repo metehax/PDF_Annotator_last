@@ -471,6 +471,26 @@ class PDFDocument:
             self.doc.copy_page(index, to=index)
         self._invalidate()
 
+    def page_bytes(self, index: int) -> bytes:
+        """Tek sayfalık PDF baytları (sayfa silme geri alınabilsin diye)."""
+        with self.lock:
+            tmp = fitz.open()
+            try:
+                tmp.insert_pdf(self.doc, from_page=index, to_page=index)
+                return tmp.tobytes()
+            finally:
+                tmp.close()
+
+    def insert_page_bytes(self, index: int, data: bytes):
+        """`page_bytes` ile alınmış sayfayı `index` konumuna geri koyar."""
+        with self.lock:
+            src = fitz.open("pdf", data)
+            try:
+                self.doc.insert_pdf(src, from_page=0, to_page=0, start_at=index)
+            finally:
+                src.close()
+        self._invalidate()
+
     def move_page(self, frm: int, to: int):
         with self.lock:
             self.doc.move_page(frm, to)
