@@ -8,6 +8,7 @@ ağır iş (işleme + PDF + OCR) `BackgroundJob`'da çalışır.
 
 from __future__ import annotations
 
+import json
 import os
 from dataclasses import dataclass, field
 from typing import Dict, List, Optional, Sequence, Union
@@ -140,17 +141,20 @@ def default_corners(src: Source, img: np.ndarray) -> np.ndarray:
 
 
 def finish_page(img: np.ndarray, skew: float, filt: str, br: float, ct: float, shadow: Optional[bool] = None,
-                strokes=()) -> np.ndarray:
-    """Köşeden düzeltilmiş görüntüyü bitirir: eğim açısı → filtre (+ gölge düzleştirme) → temizleme fırçası vuruşları."""
+                strokes=(), denoise: float = 0, stain: float = 100, margin: float = 0) -> np.ndarray:
+    """Köşeden düzeltilmiş görüntüyü bitirir: eğim açısı → kenar kırpma → filtre (+ gürültü/gölge gücü) → fırça vuruşları."""
     if abs(skew) >= 0.05:
         img = scan.rotate(img, skew)
-    out = scan.apply_filter(img, filt, br, ct, shadow)
+    if margin:
+        img = scan.crop_margin(img, margin)
+    out = scan.apply_filter(img, filt, br, ct, shadow, denoise, stain)
     return scan.erase_strokes(out, strokes) if strokes else out
 
 
 def render_page(src: Source, rot: int, corners: Optional[np.ndarray], filt: str, br: float, ct: float,
                 cache: Optional[Dict[int, "fitz.Document"]] = None, skew: float = 0.0,
-                shadow: Optional[bool] = None, strokes=()) -> np.ndarray:
+                shadow: Optional[bool] = None, strokes=(), denoise: float = 0, stain: float = 100,
+                margin: float = 0) -> np.ndarray:
     """Tek sayfanın nihai görüntüsü: yükle → döndür → köşelerden düzelt → eğim → filtre → fırça."""
     img = load_source(src, cache)
     if rot % 360:
@@ -159,7 +163,7 @@ def render_page(src: Source, rot: int, corners: Optional[np.ndarray], filt: str,
     c = default_corners(src, img) if corners is None else corners
     if not is_full(c):
         img = scan.warp(img, to_px(c, w, h))
-    return finish_page(img, skew, filt, br, ct, shadow, strokes)
+    return finish_page(img, skew, filt, br, ct, shadow, strokes, denoise, stain, margin)
 
 
 BRUSH_DEFAULT = 15                 # fırça yarıçapı: kısa kenarın binde kaçı
@@ -176,10 +180,14 @@ class ScanPage:
     skew: float = 0.0                          # eğim düzeltme açısı (derece, saat yönü; elle ya da otomatik)
     shadow: Optional[bool] = None              # gölge düzleştirme: None = filtrenin varsayılanı
     strokes: list = field(default_factory=list)  # temizleme fırçası: [(noktalar[kesir], yarıçap)] — sonuç görüntüsüne göre
+    denoise: int = 0                           # gürültü azaltma gücü 0…100
+    stain: int = 100                           # leke/gölge temizleme gücü 0…100 (gölge açıkken)
+    margin: float = 0.0                        # kenar boşluğu kırpma (% her kenardan)
 
     def spec(self):
         return (self.src, self.rot, None if self.corners is None else self.corners.copy(),
-                self.filt, self.br, self.ct, self.skew, self.shadow, [(list(pts), r) for pts, r in self.strokes])
+                self.filt, self.br, self.ct, self.skew, self.shadow, [(list(pts), r) for pts, r in self.strokes],
+                self.denoise, self.stain, self.margin)
 
 
 # ---------------------------------------------------------------------------
@@ -335,6 +343,7 @@ class ScanDialog(QDialog):
         self.cur: Optional[ScanPage] = None
         self.preview_array: Optional[np.ndarray] = None
         self.result_path: Optional[str] = None
+        self.replace_cb = None                       # tamamlanınca çıktı yoluyla çağrılır (None: yeni PDF olarak aç)
         self._work: Optional[np.ndarray] = None
         self._cache: Dict[int, "fitz.Document"] = {}
         self._job: Optional[BackgroundJob] = None
@@ -420,10 +429,10 @@ class ScanDialog(QDialog):
         self.filters.setIconSize(QSize(76, 96))
         self.filters.setGridSize(QSize(94, 124))
         self.filters.setHorizontalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
-        self.filters.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         self.filters.setWordWrap(True)
         self.filters.setSpacing(2)
-        self.filters.setFixedHeight(264)
+        self.filters.setFixedHeight(4 * 124 + 8)         # 11 filtre: 3 sütun × 4 satır, iç kaydırma yok
+        self.filters.setVerticalScrollBarPolicy(Qt.ScrollBarPolicy.ScrollBarAlwaysOff)
         for f in scan.FILTERS:
             it = QListWidgetItem(f.capitalize())
             it.setData(Qt.ItemDataRole.UserRole, f)
@@ -475,6 +484,17 @@ class ScanDialog(QDialog):
         self.chk_shadow.setToolTip("Aydınlatma/gölge farkını giderir; her filtrede açılıp kapatılabilir")
         self.chk_shadow.toggled.connect(self._shadow_toggled)
         fl.addWidget(self.chk_shadow)
+        self.sl_stain, self.lb_stain = self._small_slider(fl, "Leke/gölge temizleme gücü", 0, 100, 100, "%")
+        self.sl_denoise, self.lb_denoise = self._small_slider(fl, "Gürültü azaltma", 0, 100, 0, "%")
+        self.sl_margin, self.lb_margin = self._small_slider(fl, "Kenar boşluğu kırpma", 0, int(scan.MAX_MARGIN), 0, "%")
+        self.btn_orient = QPushButton(icon("rotate_cw"), "Yönü tahmin et")
+        self.btn_orient.setToolTip("Metin yatıksa sayfayı 90° çevirir; emin değilse dokunmaz")
+        self.btn_orient.clicked.connect(self.auto_orient)
+        fl.addWidget(self.btn_orient)
+        self.btn_apply_all = QPushButton("Bu ayarı tüm sayfalara uygula")
+        self.btn_apply_all.setToolTip("Filtre, parlaklık/kontrast, gölge, gürültü ve kenar kırpma tüm sayfalara kopyalanır")
+        self.btn_apply_all.clicked.connect(self.apply_to_all)
+        fl.addWidget(self.btn_apply_all)
         brow = QHBoxLayout()
         self.btn_brush = QPushButton(icon("blur"), "Temizle fırçası")
         self.btn_brush.setCheckable(True)
@@ -603,7 +623,8 @@ class ScanDialog(QDialog):
         busy = self._job is not None
         for w in (self.btn_auto, self.btn_full, self.btn_ccw, self.btn_cw, self.btn_reset, self.btn_del,
                   self.filters, self.sl_br, self.sl_ct, self.sl_skew, self.btn_deskew, self.chk_shadow,
-                  self.btn_brush, self.btn_page_reset):
+                  self.btn_brush, self.btn_page_reset, self.sl_stain, self.sl_denoise, self.sl_margin,
+                  self.btn_orient, self.btn_apply_all):
             w.setEnabled(has and not busy)
         n = len(self.pages)
         row = self.strip.currentRow()
@@ -639,7 +660,7 @@ class ScanDialog(QDialog):
                 QMessageBox.warning(self, "Eklenemedi", f"{k if isinstance(k, str) else k.label}\n{ex}")
                 continue
             for s in srcs:
-                p = ScanPage(s, filt="otomatik")
+                p = ScanPage(s, **({"filt": "otomatik"} | self._last_defaults()))
                 try:
                     thumb = _to_pixmap(_fit_side(load_source(s, self._cache, 240), 160))
                 except Exception as ex:
@@ -695,6 +716,92 @@ class ScanDialog(QDialog):
         if row < 0 or row >= self.strip.count():
             return
         self._load_page(self.strip.item(row).data(Qt.ItemDataRole.UserRole))
+
+    def _small_slider(self, layout, title, lo, hi, val, unit):
+        row = QHBoxLayout()
+        row.addWidget(QLabel(title))
+        lb = QLabel(f"{val}{unit}")
+        lb.setObjectName("valueLbl")
+        row.addStretch(1)
+        row.addWidget(lb)
+        layout.addLayout(row)
+        sl = QSlider(Qt.Orientation.Horizontal)
+        sl.setRange(lo, hi)
+        sl.setValue(val)
+        sl.valueChanged.connect(lambda v, lb=lb, unit=unit: self._extras_changed(lb, unit, v))
+        layout.addWidget(sl)
+        return sl, lb
+
+    def _extras_changed(self, lb, unit, v):
+        lb.setText(f"{v}{unit}")
+        if self.cur is None or self._loading:
+            return
+        self.cur.stain = self.sl_stain.value()
+        self.cur.denoise = self.sl_denoise.value()
+        self.cur.margin = float(self.sl_margin.value())
+        self._invalidate_strokes() if self.cur.margin else None
+        self._remember()
+        self._timer.start()
+
+    def _remember(self):
+        """Son kullanılan filtre/ayarlar (`scan/last`): yeni sayfalar bunlarla başlar."""
+        p = self.cur
+        if p is None or self._main is None:
+            return
+        try:
+            self._main.settings.setValue("scan/last", json.dumps(
+                {"filt": p.filt, "br": p.br, "ct": p.ct, "denoise": p.denoise, "stain": p.stain, "margin": p.margin}))
+        except Exception:
+            pass
+
+    def _last_defaults(self) -> dict:
+        try:
+            d = json.loads(str(self._main.settings.value("scan/last", "") or "{}"))
+        except Exception:
+            return {}
+        if d.get("filt") not in scan.FILTERS:
+            return {}
+        return {k: d[k] for k in ("filt", "br", "ct", "denoise", "stain", "margin") if k in d}
+
+    def auto_orient(self):
+        """Yatık metni 90° döndürür; güvenilmezse dokunmaz. Uygulanan dönüşü (0/90) döndürür."""
+        p = self.cur
+        warped = self._warped_work()
+        if p is None or warped is None:
+            return 0
+        d = scan.estimate_orientation(warped)
+        if d:
+            self.rotate_page(d)
+            self.hint.setText("Yön düzeltildi (90°). Ters ise “Sola” ile çevirin.")
+        else:
+            self.hint.setText("Yön için güvenilir bir bulgu yok; sayfaya dokunulmadı.")
+        return d
+
+    def apply_to_all(self):
+        """Seçili sayfanın görünüm ayarlarını tüm sayfalara kopyalar (köşe/dönme/eğim/fırça kalır). Etkilenen sayıyı döndürür."""
+        src = self.cur
+        if src is None:
+            return 0
+        n = 0
+        for p in self.pages:
+            if p is src:
+                continue
+            p.filt, p.br, p.ct, p.shadow = src.filt, src.br, src.ct, src.shadow
+            p.denoise, p.stain = src.denoise, src.stain
+            if p.margin != src.margin:
+                p.strokes = []
+            p.margin = src.margin
+            n += 1
+        self.hint.setText(f"Ayar {n} sayfaya uygulandı.")
+        for i, p in enumerate(self.pages):
+            if p is not src and i < self.strip.count():
+                try:
+                    img = render_page(p.src, p.rot, p.corners, p.filt, p.br, p.ct, self._cache, p.skew, p.shadow, (),
+                                      p.denoise, p.stain, p.margin)
+                    self.strip.item(i).setIcon(icon_from(_to_pixmap(_fit_side(img, 160))))
+                except Exception:
+                    pass
+        return n
 
     def _load_page(self, p: ScanPage):
         self.cur = p
@@ -761,6 +868,7 @@ class ScanDialog(QDialog):
         if self.cur is None or self._loading or row < 0:
             return
         self.cur.filt = scan.FILTERS[row]
+        self._remember()
         self._sync_skew_shadow()
         self._refresh_preview(cards=False)
 
@@ -770,6 +878,7 @@ class ScanDialog(QDialog):
         if self.cur is None or self._loading:
             return
         self.cur.br, self.cur.ct = self.sl_br.value(), self.sl_ct.value()
+        self._remember()
         self._timer.start()
 
     # -- eğim / gölge / fırça / sayfa sıfırlama ----------------------------------------
@@ -783,6 +892,12 @@ class ScanDialog(QDialog):
         self.sl_skew.setValue(int(round(p.skew * 10)))
         self.lb_skew.setText(f"{p.skew:+.1f}°".replace(".", ","))
         self.chk_shadow.setChecked(scan.default_shadow(p.filt) if p.shadow is None else p.shadow)
+        for sl, lb, v in ((self.sl_stain, self.lb_stain, p.stain), (self.sl_denoise, self.lb_denoise, p.denoise),
+                          (self.sl_margin, self.lb_margin, int(p.margin))):
+            sl.blockSignals(True)
+            sl.setValue(int(v))
+            lb.setText(f"{int(v)}%")
+            sl.blockSignals(False)
         for w in (self.sl_skew, self.chk_shadow):
             w.blockSignals(False)
 
@@ -828,6 +943,7 @@ class ScanDialog(QDialog):
             return
         p.rot, p.corners, p.filt, p.br, p.ct = 0, None, "otomatik", 0, 0
         p.skew, p.shadow, p.strokes = 0.0, None, []
+        p.denoise, p.stain, p.margin = 0, 100, 0.0
         self._live_stroke = None
         self._load_page(p)
         self.hint.setText("Sayfa sıfırlandı.")
@@ -906,7 +1022,7 @@ class ScanDialog(QDialog):
         if warped is None:
             return
         strokes = list(p.strokes) + ([self._live_stroke] if self._live_stroke else [])
-        self.preview_array = finish_page(warped, p.skew, p.filt, p.br, p.ct, p.shadow, strokes)
+        self.preview_array = finish_page(warped, p.skew, p.filt, p.br, p.ct, p.shadow, strokes, p.denoise, p.stain, p.margin)
         self.result_lbl.setText("")
         self._fit_result()
         item = self.strip.currentItem()
@@ -962,10 +1078,10 @@ class ScanDialog(QDialog):
             cache: Dict[int, "fitz.Document"] = {}
             arrays = []
             try:
-                for i, (src, rot, corners, filt, br, ct, skew, shadow, strokes) in enumerate(specs):
+                for i, (src, rot, corners, filt, br, ct, skew, shadow, strokes, dn, st, mg) in enumerate(specs):
                     if cancelled():
                         raise convert.Cancelled()
-                    arrays.append(render_page(src, rot, corners, filt, br, ct, cache, skew, shadow, strokes))
+                    arrays.append(render_page(src, rot, corners, filt, br, ct, cache, skew, shadow, strokes, dn, st, mg))
                     progress(i + 1, total)
             finally:
                 for d in cache.values():
@@ -1025,8 +1141,11 @@ class ScanDialog(QDialog):
         self.result_path = out
         self.status.setText("Tamamlandı: " + os.path.basename(out))
         try:
-            self._main.open_paths([out])
-            self._main.toasts.show("Tarama PDF'i oluşturuldu.", "success")
+            if self.replace_cb is not None:                 # açık belgede yerine koy
+                self.replace_cb(out)
+            else:
+                self._main.open_paths([out])
+                self._main.toasts.show("Tarama PDF'i oluşturuldu.", "success")
         except Exception:
             pass
         self.accept()

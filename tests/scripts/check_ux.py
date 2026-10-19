@@ -203,7 +203,7 @@ check("Dönüştür ▸ Word/Excel/Düzleştir; Güvenlik ▸ parola/denetim/KVK
       <= {a.text() for a in sub["Güvenlik ve gizlilik"].actions()})
 check("Damga kütüphanesi İmza menüsünde", acts["Damga kütüphanesi…"] in menus["İmza"].actions())
 check("Dosya alt menüleri: Dışa aktar / Paylaş / Tara ve içe aktar / Birleştir ve böl", {"Dışa aktar", "Paylaş", "Tara ve içe aktar", "Birleştir ve böl"} <= {a.text() for a in dosya if a.menu()})
-expected = ["Sayfayı sil", "Fotoğraftan belge tara…", "Telefonla aktar (QR)…", "Birleştir…", "Düzleştir ve kaydet…", "Erişilebilirlik denetimi…", "KVKK"]
+expected = ["Sayfayı sil", "Tara…", "Telefonla aktar (QR)…", "Birleştir…", "Düzleştir ve kaydet…", "Erişilebilirlik denetimi…", "KVKK"]
 allacts = {a.text() for a in w.findChildren(QAction)}
 check("eski eylemlerin hepsi hâlâ var", all(any(e in t for t in allacts) for e in expected) and "Her sayfayı ayrı PDF yap…" in allacts and "Sayfa aralığını çıkar…" in allacts)
 cmds = w._palette_commands("")
@@ -395,7 +395,7 @@ sd.show()
 pump(500)
 f = sd.filters
 rects = [f.visualItemRect(f.item(i)) for i in range(f.count())]
-check("filtre kartları: 3 sütun × 2 satır", rects[0].y() == rects[1].y() == rects[2].y() and rects[3].y() == rects[4].y() == rects[5].y() and rects[3].y() > rects[0].y(),
+check("filtre kartları: 3 sütun × 4 satır", rects[0].y() == rects[1].y() == rects[2].y() and rects[3].y() == rects[4].y() == rects[5].y() and rects[3].y() > rects[0].y() and rects[9].y() > rects[6].y(),
       str([(r.x(), r.y()) for r in rects]))
 check("filtre listesinde iç kaydırma çubuğu yok", not f.verticalScrollBar().isVisible() and not f.horizontalScrollBar().isVisible()
       and f.verticalScrollBarPolicy().name == "ScrollBarAlwaysOff")
@@ -463,8 +463,8 @@ s.undo_stack.undo()
 
 # ====================== O8 / D1 / D2 / D3: adlar, ikonlar, etiket kuralı ======================
 names_now = {a.text() for a in w.findChildren(QAction)}
-check("yeni adlar var: Fotoğraftan belge tara… / Sayfaları tarayıcıda düzelt… / Sayfa kenarlarını kırp… / Metin farkını göster",
-      {"Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…", "Sayfa kenarlarını kırp…", "Metin farkını göster"} <= names_now)
+check("yeni adlar var: Tara… / Sayfaları tarayıcıda düzelt… / Sayfa kenarlarını kırp… / Metin farkını göster",
+      {"Tara…", "Sayfaları tarayıcıda düzelt…", "Sayfa kenarlarını kırp…", "Metin farkını göster"} <= names_now)
 check("eski benzer adlar kalmadı", not ({"Belge tara (görsellerden)…", "Bu belgeyi tara/kırp…", "Sayfaları kırp…", "Metin farkını göster (iki sürümü karşılaştır)"} & names_now))
 yardim = next(m for m in w.findChildren(QMenu) if m.title() == "Yardım")
 check("Yardım menüsü Klavye kısayolları + Güncellemeleri denetle + Hakkında (Birlikte aç yönetimi Tercihler'e taşındı)", [a.text() for a in yardim.actions() if not a.isSeparator()] == ["Klavye kısayolları", "Güncellemeleri denetle…", "Hakkında"]

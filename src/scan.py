@@ -26,7 +26,9 @@ TO_PDF_MAX_SIDE = 4000   # to_pdf dosya girdilerinde en uzun kenar (px)
 MIN_AREA_RATIO = 0.20    # kâğıt dörtgeninin görüntüye oranı (en az)
 MAX_AREA_RATIO = 0.98    # bunun üstü "tüm kare" sayılır (kâğıt bulunamadı)
 
-FILTERS = ("orijinal", "otomatik", "belge", "gri", "canlı", "gölgesiz renkli")
+FILTERS = ("orijinal", "otomatik", "belge", "gri", "canlı", "gölgesiz renkli",
+           "keskin metin", "gri germe", "mürekkep tasarrufu", "sepya", "negatif")
+MAX_MARGIN = 15.0        # kenar boşluğu kırpma: her kenardan en çok bu kadar yüzde
 PAGE_SIZES = {"a4": (595.276, 841.89), "letter": (612.0, 792.0)}
 
 _TR = str.maketrans("ıİöÖüÜçÇşŞğĞ", "iIoOuUcCsSgG")
@@ -290,30 +292,81 @@ def _unsharp(a: np.ndarray, amount: float = 0.6, sigma: float = 1.2) -> np.ndarr
     return cv2.addWeighted(a, 1 + amount, blur, -amount, 0)
 
 
+def _flatten_s(a: np.ndarray, guc: float = 100.0) -> np.ndarray:
+    """Gölge/leke temizleme: `guc` 0…100 (100 = tam düzleştirme, 0 = dokunma)."""
+    t = max(0.0, min(100.0, guc)) / 100.0
+    if t <= 0:
+        return a
+    f = _flatten(a)
+    if t >= 1:
+        return f
+    return np.clip(a.astype(np.float32) * (1 - t) + f.astype(np.float32) * t, 0, 255).astype(np.uint8)
+
+
+def _denoise(a: np.ndarray, guc: float) -> np.ndarray:
+    """Gürültü azaltma (kenar koruyan): `guc` 0…100."""
+    if guc <= 0:
+        return a
+    sig = 10 + 0.8 * min(100.0, guc)
+    return cv2.bilateralFilter(a, 5, sig, 3 + guc / 25.0)
+
+
+def crop_margin(img, yuzde: float) -> np.ndarray:
+    """Her kenardan yüzde kadar keser (0…MAX_MARGIN); 0 → görüntü aynen."""
+    a = _as_rgb(img)
+    y = max(0.0, min(MAX_MARGIN, float(yuzde))) / 100.0
+    if y <= 0:
+        return a
+    h, w = a.shape[:2]
+    dy, dx = int(round(h * y)), int(round(w * y))
+    if h - 2 * dy < 8 or w - 2 * dx < 8:
+        return a
+    return np.ascontiguousarray(a[dy:h - dy, dx:w - dx])
+
+
+ORIENT_RATIO = 1.3
+
+
+def estimate_orientation(img) -> int:
+    """Metin satırı yönünden sayfanın yatık olup olmadığını tahmin eder: 0 (dik) ya da 90 (saat yönünde
+    döndürülmesi gereken). Güvenilmezse 0 döner. 0° ile 180° (baş aşağı) ayırt edilemez."""
+    mask = _ink_mask(_as_rgb(img))
+    if mask is None:
+        return 0
+    f = mask.astype(np.float64)
+    rows, cols = f.sum(axis=1), f.sum(axis=0)
+    if rows.mean() <= 0 or cols.mean() <= 0:
+        return 0
+    r_cv, c_cv = rows.std() / rows.mean(), cols.std() / cols.mean()   # satırlar yataysa satır profili belirgin dalgalanır
+    return 90 if c_cv > ORIENT_RATIO * r_cv else 0
+
+
 def _gray3(g: np.ndarray) -> np.ndarray:
     return np.ascontiguousarray(np.stack([g] * 3, axis=-1))
 
 
 def default_shadow(ad: str) -> bool:
-    """Filtrenin varsayılan gölge düzleştirmesi: `belge` ve `gölgesiz renkli` açık, diğerleri kapalı."""
+    """Filtrenin varsayılan gölge düzleştirmesi: `belge`, `gölgesiz renkli`, `mürekkep tasarrufu` açık, diğerleri kapalı."""
     key = _FILTER_KEYS.get(_fold(ad))
     if key is None:
         raise ValueError(f"Bilinmeyen filtre: {ad!r}")
-    return key in ("belge", "gölgesiz renkli")
+    return key in ("belge", "gölgesiz renkli", "mürekkep tasarrufu")
 
 
 def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: float = 0,
-                 golge: Optional[bool] = None) -> np.ndarray:
+                 golge: Optional[bool] = None, gurultu: float = 0, golge_guc: float = 100) -> np.ndarray:
     """Filtre uygular (bkz. `FILTERS`; Türkçe karakter/büyük harf farkı yok sayılır).
     `golge`: gölge/aydınlatma düzleştirme — None: filtrenin varsayılanı (`default_shadow`), True/False: her filtrede
-    elle aç/kapa. Çıktı her zaman giriş boyutunda (h, w, 3) uint8; `belge` yalnızca 0/255 içerir."""
+    elle aç/kapa; `golge_guc` 0…100 temizleme gücü. `gurultu` 0…100 gürültü azaltma.
+    Çıktı her zaman giriş boyutunda (h, w, 3) uint8; `belge` yalnızca 0/255 içerir."""
     key = _FILTER_KEYS.get(_fold(ad))
     if key is None:
         raise ValueError(f"Bilinmeyen filtre: {ad!r}")
-    a = _as_rgb(img)
+    a = _denoise(_as_rgb(img), gurultu)
     flat = default_shadow(ad) if golge is None else bool(golge)
-    if flat and key not in ("belge", "gölgesiz renkli"):
-        a = _flatten(a)                                    # diğer filtrelerde yalnız istenirse
+    own_flat = key in ("belge", "gölgesiz renkli", "mürekkep tasarrufu")
+    if flat and not own_flat:
+        a = _flatten_s(a, golge_guc)                       # diğer filtrelerde yalnız istenirse
     if key == "orijinal":
         out = a.copy()
     elif key == "otomatik":
@@ -327,7 +380,7 @@ def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: floa
     elif key == "belge":
         g = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY)
         if flat:
-            g = _flatten(g)
+            g = _flatten_s(g, golge_guc)
         g = _bright_contrast(g, parlaklik, kontrast)
         block = max(15, (min(g.shape) // 20) | 1)
         bw = cv2.adaptiveThreshold(g, 255, cv2.ADAPTIVE_THRESH_GAUSSIAN_C, cv2.THRESH_BINARY, block, 15)
@@ -340,8 +393,25 @@ def apply_filter(img, ad: str = "orijinal", parlaklik: float = 0, kontrast: floa
         hsv = cv2.cvtColor(cv2.cvtColor(lab, cv2.COLOR_LAB2RGB), cv2.COLOR_RGB2HSV)
         hsv[:, :, 1] = np.clip(hsv[:, :, 1].astype(np.float32) * 1.3, 0, 255).astype(np.uint8)
         out = cv2.cvtColor(hsv, cv2.COLOR_HSV2RGB)
-    else:  # gölgesiz renkli
-        out = _unsharp(_flatten(a) if flat else a, 0.3)
+    elif key == "gölgesiz renkli":
+        out = _unsharp(_flatten_s(a, golge_guc) if flat else a, 0.3)
+    elif key == "keskin metin":
+        out = _unsharp(a, 1.6, 1.0)
+    elif key == "gri germe":
+        g = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY)
+        lo, hi = np.percentile(g, (2, 98))
+        if hi - lo < 8:
+            out = _gray3(g)
+        else:
+            out = _gray3(np.clip((g.astype(np.float32) - lo) * (255.0 / (hi - lo)), 0, 255).astype(np.uint8))
+    elif key == "mürekkep tasarrufu":
+        x = _flatten_s(a, golge_guc) if flat else a
+        out = np.clip((x.astype(np.float32) - 40.0) * (255.0 / 175.0), 0, 255).astype(np.uint8)
+    elif key == "sepya":
+        g = cv2.cvtColor(a, cv2.COLOR_RGB2GRAY).astype(np.float32) / 255.0
+        out = np.clip(np.stack([g * 255 * 1.07, g * 255 * 0.74, g * 255 * 0.43], axis=-1), 0, 255).astype(np.uint8)
+    else:  # negatif
+        out = 255 - a
     return _bright_contrast(out, parlaklik, kontrast)
 
 

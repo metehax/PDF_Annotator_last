@@ -219,8 +219,26 @@ class DocToolsMixin:
         dlg.show()
         return dlg
 
-    def scan_document(self):
-        """Açık belgenin sayfalarını (200 dpi) tarama penceresinde aç: kırp, temizle, yeniden PDF yap."""
+    def scan_command(self):
+        """Doğrudan "Tara": kaynak seç (Dosyalar · Telefondan · Açık belge) ve ilgili pencereyi aç."""
+        from ui.scansource import ScanSourceDialog
+        s = self.active_session
+        dlg = ScanSourceDialog(self, s.pdf.page_count if s else 0, s.current_page if s else 0)
+        if not dlg.exec():
+            return None
+        src = dlg.source()
+        if src == "phone":
+            d = self.open_share()
+            d.tabs.setCurrentIndex(0)
+            return d
+        if src == "doc":
+            pages = dlg.pages()
+            return self.scan_document(pages, dlg.replace()) if pages else None
+        return self.scan_images()
+
+    def scan_document(self, pages=None, replace: bool = False):
+        """Açık belgenin sayfalarını (200 dpi) tarama penceresinde aç: kırp, temizle, yeniden PDF yap.
+        `pages`: 0 tabanlı dizinler (None = tümü). `replace`: sonuç aynı PDF'te o sayfaların yerine konur (geri alınabilir)."""
         s = self.active_session
         if not s:
             self.toasts.show("Önce bir belge açın.", "info")
@@ -233,9 +251,45 @@ class DocToolsMixin:
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Belge hazırlanamadı:\n{ex}")
             return None
-        dlg = self._scan_dialog = ScanDialog(self, srcs, start=s.current_page)
+        chosen = sorted(set(pages)) if pages else list(range(len(srcs)))
+        srcs = [srcs[i] for i in chosen]
+        start = chosen.index(s.current_page) if s.current_page in chosen else 0
+        dlg = self._scan_dialog = ScanDialog(self, srcs, start=start)
+        if replace:
+            dlg.replace_cb = lambda out: self._replace_scanned(s, chosen, out)
         dlg.show()
         return dlg
+
+    def _replace_scanned(self, s, pages, out):
+        """Taranan sayfaları (PDF `out`) belgede `pages` yerine koyar; sayı tutmazsa yeni PDF olarak açar."""
+        from models import PagesReplaceCommand
+        with fitz.open(out) as scanned:
+            if scanned.page_count != len(pages):
+                self.toasts.show("Sayfa sayısı değiştiği için sonuç yeni PDF olarak açıldı.", "warning")
+                self.open_paths([out])
+                return False
+            before = s.pdf.snapshot_bytes()
+            doc = fitz.open("pdf", before)
+            try:
+                for k in range(len(pages) - 1, -1, -1):          # sondan başa: önceki dizinler kaymaz
+                    doc.delete_page(pages[k])
+                    doc.insert_pdf(scanned, from_page=k, to_page=k, start_at=pages[k])
+                after = doc.write()
+            finally:
+                doc.close()
+        s.pdf.replace_content(after)
+        s.undo_stack.push(PagesReplaceCommand(s, "Taranan sayfaları yerine koy", before, after, pages,
+                                              on_change=lambda: self._scan_replaced_changed(s)))
+        self._scan_replaced_changed(s)
+        self.toasts.show(f"{len(pages)} sayfa taranan sürümle değiştirildi (Ctrl+Z geri alır).", "success")
+        return True
+
+    def _scan_replaced_changed(self, s):
+        s.pdf._invalidate()
+        self._mark_dirty(s)
+        self._build_thumbnails()
+        self._build_toc()
+        self.goto_page(min(s.current_page, s.pdf.page_count - 1))
 
     # -- Word / Excel dönüştürme ve erişilebilirlik ---------------------------
     def open_flatten(self):

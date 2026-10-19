@@ -4,7 +4,7 @@ import sys
 
 APP_NAME = "PDF Annotator"
 APP_TITLE = "PDF İşaretleme Aracı"          # pencere başlığında görünen Türkçe ad
-VERSION = "1.0.0"
+VERSION = "1.1.0"
 PUBLISHER = "PDF Annotator"
 APP_ID = "{8E5C7A41-3B9D-4F26-A1C0-6D2B94E7F315}"   # sabit GUID: kurucu ve güncelleme aynısını kullanır
 UPDATE_URL = "https://api.github.com/repos/metehax/PDF_Annotator_last/releases/latest"   # herkese açık depo gerekir

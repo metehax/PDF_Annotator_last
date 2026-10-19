@@ -81,7 +81,7 @@ def pump(until=None, limit=60000, ms=100):
 
 
 texts = [a.text() for a in w.findChildren(QAction)]
-for t in ("Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…"):
+for t in ("Tara…", "Sayfaları tarayıcıda düzelt…"):
     check(f"menü: {t}", t in texts)
 
 # --- pencere + otomatik kose
@@ -130,7 +130,7 @@ pump(until=lambda: dlg.preview_array.mean() > m0 + 5, limit=3000)
 check("parlaklik kaydirici -> onizleme aydinlanir", dlg.preview_array.mean() > m0 + 5 and dlg.cur.br == 40)
 dlg.btn_reset.click()
 check("sifirla", dlg.sl_br.value() == 0 and dlg.sl_ct.value() == 0 and dlg.cur.br == 0)
-check("filtre kartlari 6 ve onizlemeli", dlg.filters.count() == 6 and all(not dlg.filters.item(i).icon().isNull() for i in range(6)))
+check("filtre kartlari 11 ve onizlemeli", dlg.filters.count() == 11 and all(not dlg.filters.item(i).icon().isNull() for i in range(11)))
 dlg.filters.setCurrentRow(names.index("otomatik"))
 
 # --- dondur

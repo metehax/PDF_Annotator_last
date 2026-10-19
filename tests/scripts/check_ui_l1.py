@@ -188,7 +188,7 @@ check("karşılama: Aç · Tara · Telefondan al · Birleştir · Böl", [w.welc
     "Aç", "Tara", "Telefondan al", "Birleştir", "Böl"])
 calls = []
 w.open_pdf = lambda: calls.append("open")
-w.scan_images = lambda *a, **k: calls.append("scan")
+w.scan_command = lambda *a, **k: calls.append("scan")
 w.open_share = lambda: calls.append("phone")
 w.merge_pdfs = lambda: calls.append("merge")
 for k in ("open", "scan", "phone", "merge"):

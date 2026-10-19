@@ -604,7 +604,7 @@ class MainWindow(
         if key == "open":
             self.open_pdf()
         elif key == "scan":
-            self.scan_images()
+            self.scan_command()
         elif key == "phone":
             self.open_share()
         elif key == "merge":

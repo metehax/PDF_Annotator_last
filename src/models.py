@@ -1265,6 +1265,30 @@ class DocContentCommand(QUndoCommand):
             self.on_change()
 
 
+class PagesReplaceCommand(DocContentCommand):
+    """Seçili sayfaların (taranıp) yerine konması: belge baytlarıyla birlikte o sayfalardaki işaretler de geri alınabilir.
+    İşaretler tarama görüntüsüne pişmiş olduğundan değişiklik anında silinir (`session.annotations`)."""
+
+    def __init__(self, session, label, before, after, pages, on_change=None):
+        super().__init__(session, label, before, after, on_change)
+        self.pages = list(pages)
+        self._removed = {p: list(session.annotations.get(p, [])) for p in self.pages}
+        for p in self.pages:
+            session.annotations.pop(p, None)
+
+    def redo(self):
+        if not self._first:
+            for p in self.pages:
+                self.session.annotations.pop(p, None)
+        super().redo()
+
+    def undo(self):
+        for p, lst in self._removed.items():
+            if lst:
+                self.session.annotations[p] = list(lst)
+        super().undo()
+
+
 class FormValuesCommand(QUndoCommand):
     """Form alanlarının değerlerini yazar (ad -> değer; reset=True: tümünü boşalt).
     Hesaplanan alanlar her seferinde yeniden hesaplanır."""

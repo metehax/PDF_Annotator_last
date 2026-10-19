@@ -180,7 +180,7 @@ Ortak ilkeler: yeni ayar = `QSettings` anahtarı + Tercihler'de görünür; yeni
 - Boşta durma bildirimi L1'deki düzeltmeyle uyumlu.
 **Bitti ölçütü:** `check_qrshare_*` geçer + yeni testler: sekmeler, `X-Action` beyaz listesi, otomatik tarama kuyruğu, gönder sekmesinde çoklu dosya listesi.
 
-## L4 — Tarama: daha çok filtre/özellik, tek sayfa mı tüm PDF mi, doğrudan Tara komutu
+## L4 — Tarama: daha çok filtre/özellik, tek sayfa mı tüm PDF mi, doğrudan Tara komutu (KOD TAMAM; yayın bekliyor)
 **Önce oku:** `scan.py` (`FILTERS`, `apply_filter`), `ui/scanner.py`, `mw_doctools.py` `scan_images/scan_document`.
 **Yapılacak**
 - **Doğrudan "Tara" komutu** (komut paleti + üst çubuk + karşılama kartı): tek kaynak seçici penceresi (Dosyalar · Telefondan · Açık belge); *Tara ve içe aktar* menüsündeki ayrı adımlar buna iner. Son kullanılan filtre/ayarlar hatırlanır (`scan/last`).
