@@ -610,11 +610,7 @@ class MainWindow(
         elif key == "merge":
             self.merge_pdfs()
         elif key == "split":
-            if not self.active_session:
-                self.toasts.show("Bölmek istediğiniz PDF'i seçin.", "info")
-                self.open_pdf()
-            if self.active_session:
-                self.split_all_pages()
+            self.split_pdfs()
 
     def _recent_paths(self, visible=False):
         """Son açılanlar (en yeni önce). `visible=True`: × ile gizlenenler çıkarılır (dosya `recent` listesinde kalır)."""

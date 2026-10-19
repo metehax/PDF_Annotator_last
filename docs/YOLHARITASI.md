@@ -162,7 +162,7 @@ Ortak ilkeler: yeni ayar = `QSettings` anahtarı + Tercihler'de görünür; yeni
 - **Şekil çizimi (dikdörtgen/elips/çizgi):** kenarlar tırtıklı/kaba görünüyor: `views.py`/`overlays` içinde ilgili `QGraphicsItem`'larda `Antialiasing`, `QPen` `RoundJoin/RoundCap`, ince çizgide kozmetik kalem yerine ölçekli kalem; yazılan PDF çıktısında da (`models.py` ilgili `apply_to_page`) aynı kalınlık/uç tipi. Önce ilgili kodu `Grep` ile bul, ekran görüntüsünü yalnızca sonda al.
 **Bitti ölçütü:** `check_ux.py` güncel ve geçer; yeni `check_ui_l1.py`: Ayarlar kategorileri/arama, palet son kullanılanlar, son açılan × gizleme + yeniden başlatınca geri gelme, e-posta izi yok (grep), boşta bildirimi tek kez.
 
-## L2 — Birleştir / Böl: sayfa aralığı, çoklu işlem, önizleme
+## L2 — Birleştir / Böl: sayfa aralığı, çoklu işlem, önizleme (TAMAM)
 **Önce oku:** `mw_export.py` (birleştir/böl), `pdf_engine.py` ilgili işlevler. Çekirdek arayüzsüz yeni modül `pdfops.py` (test edilebilir), UI `ui/mergesplit.py`.
 **Yapılacak**
 - **Birleştir penceresi:** dosya listesi (sürükle-bırak sırala, ekle/çıkar); her dosya için **sayfa aralığı** ("1-3, 5, 8-"); sağda **küçük resim önizleme** (seçili sayfalar; ilk ve son sayfa büyükçe, yanlış sayfa kolay fark edilsin; tembel render, `MAX_PIXELS` sınırı); çıktı adı/konumu (`workspace.join_out`); **klasörden tümünü ekle**.

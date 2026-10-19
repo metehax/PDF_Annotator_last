@@ -210,6 +210,7 @@ class BuildMixin:
         A(m_in, "phone", "Telefonla aktar (QR)…", self.open_share, needs_doc=False)
         m_split = m_file.addMenu(icon("merge"), "Birleştir ve böl")
         A(m_split, "merge", "Birleştir…", self.merge_pdfs, needs_doc=False)
+        A(m_split, "pages", "Böl…", self.split_pdfs, needs_doc=False)
         A(m_split, "split", "Her sayfayı ayrı PDF yap…", self.split_all_pages)
         A(m_split, "scissors", "Sayfa aralığını çıkar…", self.extract_page_range)
         m_file.addSeparator()

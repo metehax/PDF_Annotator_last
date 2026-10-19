@@ -17,7 +17,7 @@ from PySide6.QtWidgets import QCheckBox, QDialog, QFileDialog, QInputDialog, QMe
 from models import RedactionAnnotation
 
 from pdf_engine import (
-    IMAGE_EXTS, image_to_pdf_document, is_image_path, save_project_json, load_project_json,
+    IMAGE_EXTS, is_image_path, save_project_json, load_project_json,
 )
 from ui.watermark import WatermarkDialog
 from mw_common import OPEN_FILTER
@@ -181,32 +181,22 @@ class ExportMixin:
         except Exception as ex:
             QMessageBox.critical(self, "Hata", f"Dışa aktarılamadı:\n{ex}")
 
-    def merge_pdfs(self):
-        files, _ = QFileDialog.getOpenFileNames(self, "Birleştirilecek PDF / resimleri seçin (sırayla)", "", OPEN_FILTER)
-        if len(files) < 2:
-            if files:
-                self.toasts.show("Birleştirmek için en az 2 dosya seçin.", "warning")
-            return
-        out_path, _ = QFileDialog.getSaveFileName(self, "Birleşik PDF'i Kaydet", "birlesik.pdf", "PDF (*.pdf)")
-        if not out_path:
-            return
-        if not out_path.lower().endswith(".pdf"):
-            out_path += ".pdf"
-        try:
-            merged = fitz.open()
-            for f in files:
-                src = image_to_pdf_document(f)[0] if is_image_path(f) else fitz.open(f)
-                merged.insert_pdf(src)
-                src.close()
-            merged.save(out_path)
-            merged.close()
-            self._open_path_as_session(out_path)
-            self._set_ui_enabled(True)
-            self.refresh_doc_tabs()
-            self.switch_session(len(self.sessions) - 1)
-            self.status.setText(f"{len(files)} PDF birleştirildi: {out_path}")
-        except Exception as ex:
-            QMessageBox.critical(self, "Hata", f"Birleştirilemedi:\n{ex}")
+    def merge_pdfs(self, paths=None):
+        """Birleştir penceresi: sıralı liste, dosya başına sayfa aralığı, önizleme."""
+        from ui.mergesplit import MergeDialog
+        dlg = MergeDialog(self, paths or ())
+        dlg.show()
+        return dlg
+
+    def split_pdfs(self, paths=None):
+        """Böl penceresi: aralık / her N sayfa / yer imi / her sayfa; birden çok PDF."""
+        from ui.mergesplit import SplitDialog
+        if paths is None:
+            s = self.active_session
+            paths = [s.path] if s and s.path and os.path.isfile(s.path) else ()
+        dlg = SplitDialog(self, paths)
+        dlg.show()
+        return dlg
 
     def split_all_pages(self):
         s = self.active_session

@@ -458,6 +458,7 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 * **Komut paleti (Ctrl+K):** ayarlar da aranır ("tema", "çalışma klasörü" → ilgili kategori açılır); boş aramada en son kullanılan 5 komut en üsttedir; her komutta menü yolu ve kısayol gri yazılır.
 * **Son açılanlar:** her girdinin yanında **×** (yalnız listeden gizler, dosya silinmez; uygulama yeniden açılınca geri gelir) + *Listeyi temizle*.
 * **Sekmeler:** uzun adlarda başı ve uzantı görünür, tam ad ipucunda; değişmiş belge kırmızı ●; sekme genişliği Ayarlar → Görünüm'de. *Düğmelerde yazı göster* seçeneği (Geri al/Yinele).
+* **Birleştir / Böl (Dosya ▸ Birleştir ve böl):** dosya başına sayfa aralığı (`1-3, 5, 8-`), sürükleyerek sıralama, klasörden ekleme ve küçük resim önizleme; bölme: aralıklarla, her N sayfada bir, yer imine göre, her sayfa ayrı; birden çok PDF'i aynı kuralla bölme, ad şablonu `{ad}_{n}`.
 * **Karşılama ekranı:** Aç · Tara · Telefondan al · Birleştir · Böl kartları.
 * Telefon aktarımı "boşta kaldı" bildirimi artık yalnızca bir kez çıkar; şekil (dikdörtgen/elips) kenarları yuvarlak uçlu ve PDF çıktısında aynı.
 
