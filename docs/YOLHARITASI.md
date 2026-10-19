@@ -1,6 +1,6 @@
 # Yol haritası — sıradaki aşamalar
 
-Sıra: **I1 → I2 → I3 → I4 → I5 (I5a, I5b) → K1 → K2 → K3**. Her aşama ayrı sohbette, ayrı commit'te yapılır (J bölünmesi bitti: kod mw_*.py dosyalarında, küçük okumalar yeter).
+Sıra (tamamlananlar I…K3). **Sıradaki: L1 → L2 → L3 → L4 (sürüm 1.1.0, aşağıda).** Her aşama ayrı sohbette, ayrı commit'te yapılır (J bölünmesi bitti: kod mw_*.py dosyalarında, küçük okumalar yeter).
 Tamamlananlar: B, C1, C2, D1, D2, E, F, G1–G3, H1, H2, J1–J3, testler. Eski G1–J3 bölümleri yalnızca kayıt içindir; yeniden okumaya gerek yok.
 
 ## Token tasarrufu kuralları (her sohbette geçerli)
@@ -141,3 +141,50 @@ Tamamlananlar: B, C1, C2, D1, D2, E, F, G1–G3, H1, H2, J1–J3, testler. Eski 
 - `tools/make_release.py`: sürümü `appinfo.py`'den okur, kurucunun SHA-256'sını ve `latest.json`'u üretir; `YAYIN.md`: yayın adımları (sürüm artır → `build.bat` → `make_release.py` → GitHub Release'e kurucu + `latest.json` yükle).
 - Kullanıcıdan alınacak: yayın yeri (GitHub deposu mu, kendi sitesi mi) ve adres → `appinfo.UPDATE_URL`.
 **Bitti ölçütü:** `check_updater.py` — yerel sahte HTTP sunucusuyla: yeni sürüm bulunur, eski/aynı sürümde "güncel", bozuk SHA-256 reddedilir, HTTP (https değil) reddedilir, indirme iptali; kurulum çağrısı sahte (komut satırı doğrulanır).
+
+
+---
+
+# Sürüm 1.1.0 — kullanılabilirlik güncellemesi (L1 → L4)
+Kaynak: kullanıcı geri bildirimi. **Sıra L1 → L2 → L3 → L4**, her biri ayrı sohbet/commit. Sürüm numarası `appinfo.VERSION`'u **yalnızca L4 sonunda** `1.1.0` yap, `build.bat` + `tools/make_release.py` + GitHub Release (`docs/YAYIN.md`).
+Ortak ilkeler: yeni ayar = `QSettings` anahtarı + Tercihler'de görünür; yeni eylem komut paletine otomatik girer (`A(...)`); yeni ikon `ui/icons._PATHS`; kod `src/` altında; testler `tests/scripts/check_<ad>.py` (+ `check_ux.py` menü beklentileri bilerek güncellenir).
+
+## L1 — Arayüz: Ayarlar, komut paleti, sekmeler, Paylaş, e-postayı kaldırma
+**Yapılacak**
+- **Ayarlar düğmesi:** üst çubukta görünür ⚙ **Ayarlar** (Dışa aktar'ın yanında). `PreferencesDialog` soldan kategori listesi (Genel · Görünüm · Çalışma klasörü · Tarama · Telefon aktarımı · Güncelleme · Kısayollar) olsun; mevcut bölümleri kategorilere dağıt, davranışı değiştirme.
+- **Komut paleti (`ui/palette.py`):** ayarlar da aranabilir ("tema", "çalışma klasörü" → ilgili kategori açılır); en üstte **son kullanılan** komutlar (ayar `palette/recent`, ≤5); her komutta kısayol ve menü yolu gri yazı.
+- **Paylaş düğmesi:** Dışa aktar'ın yanında **Paylaş** menü düğmesi: Telefona gönder (L3'teki pencerenin "Gönder" sekmesi), Bulut klasörüne kaydet, Dosya konumunu aç. Telefona gönder için şimdilik mevcut `open_share` yeter.
+- **E-posta kaldırılır:** `share_email`, `sharing.compose_email/find_outlook` ve menü/palet girdisi, ilgili testler ve README/CLAUDE.md anlatımı silinir (ölü kod bırakma).
+- **Son açılanlar:** her girdinin yanında **×**; tıklayınca o girdi *görünümden* gizlenir (ayar `recent_hidden`, yol listesi); dosya silinmez, `recent` listesinde kalır. Uygulama kapanıp açılınca gizlenenler yeniden görünür (açılışta `recent_hidden` temizlenir). Hem Dosya → Son açılanlar menüsünde hem karşılama ekranında; "Listeyi temizle" kalsın.
+- **Sekme başlığı:** uzun ad ortadan kısalmasın; ad başı + sonu (uzantı) görünsün, tam ad ipucunda; kapat düğmesi belirgin; değişmiş belge noktası net. Sekme genişliği ayarlanabilir (Görünüm).
+- **Görünürlük:** sık araç çubuğu düğmelerine yazı etiketi seçeneği (Ayar: "Düğmelerde yazı göster"), daha yüksek kontrast ve büyük tıklama alanı; boş karşılama ekranında kartlar: Aç · Tara · Telefondan al · Birleştir · Böl.
+- **Hata düzeltme:** `ui/share.py` içindeki "Telefon aktarımı boşta kaldığı için durduruldu" bildirimi pencere kapatılsa/× ile kapansa bile tekrar tekrar çıkıyor (`share.py:375` civarı): sunucu kapanınca zamanlayıcıyı durdur, bildirimi bir kez göster, pencere kapanınca (`close`/`done`) göstermeden temizle. Regresyon testi.
+- **Şekil çizimi (dikdörtgen/elips/çizgi):** kenarlar tırtıklı/kaba görünüyor: `views.py`/`overlays` içinde ilgili `QGraphicsItem`'larda `Antialiasing`, `QPen` `RoundJoin/RoundCap`, ince çizgide kozmetik kalem yerine ölçekli kalem; yazılan PDF çıktısında da (`models.py` ilgili `apply_to_page`) aynı kalınlık/uç tipi. Önce ilgili kodu `Grep` ile bul, ekran görüntüsünü yalnızca sonda al.
+**Bitti ölçütü:** `check_ux.py` güncel ve geçer; yeni `check_ui_l1.py`: Ayarlar kategorileri/arama, palet son kullanılanlar, son açılan × gizleme + yeniden başlatınca geri gelme, e-posta izi yok (grep), boşta bildirimi tek kez.
+
+## L2 — Birleştir / Böl: sayfa aralığı, çoklu işlem, önizleme
+**Önce oku:** `mw_export.py` (birleştir/böl), `pdf_engine.py` ilgili işlevler. Çekirdek arayüzsüz yeni modül `pdfops.py` (test edilebilir), UI `ui/mergesplit.py`.
+**Yapılacak**
+- **Birleştir penceresi:** dosya listesi (sürükle-bırak sırala, ekle/çıkar); her dosya için **sayfa aralığı** ("1-3, 5, 8-"); sağda **küçük resim önizleme** (seçili sayfalar; ilk ve son sayfa büyükçe, yanlış sayfa kolay fark edilsin; tembel render, `MAX_PIXELS` sınırı); çıktı adı/konumu (`workspace.join_out`); **klasörden tümünü ekle**.
+- **Böl penceresi:** modlar: aralıklarla ("1-3, 5, 8-10" → her aralık ayrı dosya ya da hepsi tek), **her N sayfada bir**, **yer imine göre**, her sayfa ayrı. Seçilen sayfaların önizleme şeridi; çıktı adları şablonu (`{ad}_{n}`), çakışmada otomatik numara.
+- **Çoklu işlem:** birden çok PDF'i aynı kuralla böl; birleştirmede birden çok klasör/dosya grubu.
+- `pdfops.py`: `parse_ranges(metin, sayfa_sayisi)` (geçersizde `ValueError` ve Türkçe ileti), `merge(kaynaklar[(yol, aralık)], out)`, `split(...)`; çıktı `.part` + `os.replace`; iptal/ilerleme (`BackgroundJob`).
+**Bitti ölçütü:** `check_pdfops.py`: aralık ayrıştırma (hatalı girdiler), merge/split sayfa sayıları ve sırası, yer imine göre bölme, iptalde dosya kalmaz; UI testi: önizleme sayfa sayısı seçimle eşleşir.
+
+## L3 — Telefon aktarımı: Al / Gönder sekmeleri, telefon web arayüzü, otomatik tarama
+**Önce oku:** `ui/share.py` (`ShareDialog`), `qrshare.py` (`PAGE`, yollar). Güvenlik kuralları (anahtar, PIN, uzantı+imza, boyut sınırı) **değişmez**.
+**Yapılacak**
+- `ShareDialog`: iki sekme **Telefondan al** / **Telefona gönder**. *Al:* büyük QR + adres; gelenler küçük resimli liste; her satırda **Tara · Aç · PDF'e çevir · Klasörde göster**; seçenek "Gelen fotoğraflar gelince tarayıcıyı otomatik aç" (ayar; varsayılan açık) ve ilk fotoğrafta pencere kendiliğinden açılır, sonrakiler aynı pencereye eklenir. *Gönder:* açık belge ya da seçilen birden çok dosya; telefonda indirme listesi.
+- **Telefon sayfası (`qrshare.PAGE`):** hangi işlem yapılacağı seçilebilsin: "Belge tara (köşe düzeltmeli)" / "Fotoğraf olarak gönder" / "PDF olarak gönder"; birden çok dosya seçimi, ilerleme çubuğu, gönderilenlerin listesi, Türkçe ve büyük dokunma alanları. Seçim yükleme isteğinde `X-Action` başlığıyla gider (yeni değer = `ALLOWED_ACTIONS` beyaz listesi; bilinmeyen reddedilir).
+- Ayarlar → "Telefon aktarımı": boşta süresi, boyut sınırı, PIN varsayılanı, otomatik açma.
+- Boşta durma bildirimi L1'deki düzeltmeyle uyumlu.
+**Bitti ölçütü:** `check_qrshare_*` geçer + yeni testler: sekmeler, `X-Action` beyaz listesi, otomatik tarama kuyruğu, gönder sekmesinde çoklu dosya listesi.
+
+## L4 — Tarama: daha çok filtre/özellik, tek sayfa mı tüm PDF mi, doğrudan Tara komutu
+**Önce oku:** `scan.py` (`FILTERS`, `apply_filter`), `ui/scanner.py`, `mw_doctools.py` `scan_images/scan_document`.
+**Yapılacak**
+- **Doğrudan "Tara" komutu** (komut paleti + üst çubuk + karşılama kartı): tek kaynak seçici penceresi (Dosyalar · Telefondan · Açık belge); *Tara ve içe aktar* menüsündeki ayrı adımlar buna iner. Son kullanılan filtre/ayarlar hatırlanır (`scan/last`).
+- **Kapsam seçeneği:** açık PDF'i tararken **Yalnız bu sayfa / Sayfa aralığı / Tüm belge**; sonuç **aynı PDF'te o sayfaların yerine** (geri alınabilir, `DocContentCommand`) ya da **yeni PDF** (ikisi seçenek).
+- **Yeni filtreler** (`scan.FILTERS`, her biri saf numpy/OpenCV): Canlı renk, Keskin metin (unsharp), Gri tonlama + kontrast germe, Mürekkep tasarrufu (açık arka plan, ince koyu metin), Eski belge/sepya, Negatif; ayarlar: **gürültü azaltma**, **leke/gölge temizleme gücü**, **kenar boşluğu kırpma**, **otomatik döndürme (yön tahmini, güvenilmezse dokunma)**; toplu: "bu ayarı tüm sayfalara uygula".
+- Filtre önizlemesi küçük kartlarla (aynı görüntüde yan yana) seçilir.
+**Bitti ölçütü:** `check_scan.py`/`check_scan_ui.py` güncel + yeni filtreler için boyut/dtype/determinizm testleri; kapsam seçeneği testi (tek sayfa yerinde değişir, undo çalışır, tüm belge/yeni PDF); sürümü `1.1.0` yap, README/CLAUDE.md kısa not, tam pytest, `build.bat`, yayın.
