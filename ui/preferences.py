@@ -18,6 +18,7 @@ from PySide6.QtWidgets import (
     QPushButton, QSpinBox, QVBoxLayout,
 )
 
+import appinfo
 import workspace
 from ui.icons import icon
 
@@ -116,6 +117,23 @@ class PreferencesDialog(QDialog):
         self.chk_last.toggled.connect(self._last_changed)
         v.addWidget(self.chk_last)
         v.addSpacing(6)
+        v.addWidget(_section("Güncelleme"))
+        self.chk_upd = QCheckBox("Açılışta güncellemeleri denetle")
+        self.chk_upd.toggled.connect(self._upd_changed)
+        v.addWidget(self.chk_upd)
+        row = QHBoxLayout()
+        self.lbl_upd = QLabel()
+        self.lbl_upd.setObjectName("hint")
+        row.addWidget(self.lbl_upd, 1)
+        self.btn_upd = QPushButton("Şimdi denetle")
+        self.btn_notes = QPushButton("Sürüm notları")
+        for b in (self.btn_upd, self.btn_notes):
+            b.setObjectName("secondary")
+            row.addWidget(b)
+        self.btn_upd.clicked.connect(lambda: self._main.check_updates(manual=True))
+        self.btn_notes.clicked.connect(lambda: self._main.show_release_notes())
+        v.addLayout(row)
+        v.addSpacing(6)
         v.addWidget(_section("Windows"))
         row = QHBoxLayout()
         row.addWidget(QLabel("\"Birlikte aç\" listesi"))
@@ -159,6 +177,13 @@ class PreferencesDialog(QDialog):
         cur = str(self._main.settings.value("theme", "") or "")
         self.cb_theme.setCurrentIndex(max(0, self.cb_theme.findData(cur if cur in ("light", "dark") else "")))
         self.chk_last.setChecked(workspace.remember_last())
+        from mw_update import auto_enabled
+        self.chk_upd.setChecked(auto_enabled(self._main.settings))
+        has_url = bool(self._main.update_url())
+        self.chk_upd.setEnabled(has_url)
+        self.btn_upd.setEnabled(has_url)
+        self.lbl_upd.setText(f"Sürüm {appinfo.VERSION}" if has_url
+                             else f"Sürüm {appinfo.VERSION} — güncelleme adresi tanımlı değil")
         self._loading = False
 
     def _sync_root_hint(self):
@@ -209,6 +234,10 @@ class PreferencesDialog(QDialog):
         hook = getattr(self._main, "restart_recovery", None)
         if hook:
             hook()
+
+    def _upd_changed(self, on: bool):
+        if not self._loading:
+            self._main.settings.setValue("update/auto", bool(on))
 
     def _theme_changed(self, *_):
         if self._loading:

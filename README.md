@@ -483,3 +483,6 @@ Beklenmeyen hatalar uygulamayı kapatmaz; `Belgeler\PDF Annotator\Gunlukler\pdfa
 - **SmartScreen:** kurucu kod imzalı değilse Windows "bilinmeyen yayıncı" uyarısı verir → *Daha fazla bilgi → Yine de çalıştır*.
 - Otomatik doğrulama: `powershell -ExecutionPolicy Bypass -File tools\kurulum_dene.ps1` (sessiz kur, `--selftest`, kaldır, izleri denetle).
 - **Başka bilgisayarda deneme listesi:** kurulum · Başlat menüsünde görünme · PDF aç · OCR · Word'e dönüştür · QR ile telefondan al · Ayarlar → Uygulamalar'dan kaldır (klasör ve girdi gitmeli).
+
+## Otomatik güncelleme (K3)
+Yardım → **Güncellemeleri denetle…** ve Tercihler → *Güncelleme* ("Açılışta denetle" varsayılan açık, "Sürüm notları"). Yeni sürümde notlar ve boyutla birlikte "İndir ve kur" sorulur; kurucu SHA-256 ile doğrulanır, yalnız HTTPS kabul edilir, ağ hataları açılışta sessizdir. `appinfo.UPDATE_URL` boşsa özellik kapalıdır. Yayın adımları: `YAYIN.md` (`tools\make_release.py` → GitHub Release).

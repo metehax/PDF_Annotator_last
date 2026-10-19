@@ -52,6 +52,7 @@ class WorkspaceMixin:
         self.check_migration()
         self.check_recovery()
         self.start_recovery()
+        QTimer.singleShot(4000, self.auto_check_updates)      # sessiz; adres yoksa/kapalıysa hiçbir şey yapmaz
 
     def check_migration(self, decide: Optional[Callable[[str, int], str]] = None) -> Optional[str]:
         """Eski 'PDF Annotator Gelen' klasörü varsa taşımayı önerir. decide(yol, dosya_sayısı) → "move"|"later"|"never".

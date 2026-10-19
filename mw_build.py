@@ -328,6 +328,7 @@ class BuildMixin:
         m_help = QMenu("Yardım", self)
         A(m_help, "info", "Klavye kısayolları", self._show_shortcuts, "F1", needs_doc=False)
         m_help.addSeparator()
+        A(m_help, "update", "Güncellemeleri denetle…", lambda: self.check_updates(manual=True), needs_doc=False)
         A(m_help, "app", "Hakkında", self._show_about, needs_doc=False)
 
         # sağ üstteki "Dışa Aktar" düğmesinin menüsü

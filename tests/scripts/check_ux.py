@@ -466,7 +466,7 @@ check("yeni adlar var: Fotoğraftan belge tara… / Sayfaları tarayıcıda düz
       {"Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…", "Sayfa kenarlarını kırp…", "Metin farkını göster"} <= names_now)
 check("eski benzer adlar kalmadı", not ({"Belge tara (görsellerden)…", "Bu belgeyi tara/kırp…", "Sayfaları kırp…", "Metin farkını göster (iki sürümü karşılaştır)"} & names_now))
 yardim = next(m for m in w.findChildren(QMenu) if m.title() == "Yardım")
-check("Yardım menüsü yalnız Klavye kısayolları + Hakkında (Birlikte aç yönetimi Tercihler'e taşındı)", [a.text() for a in yardim.actions() if not a.isSeparator()] == ["Klavye kısayolları", "Hakkında"]
+check("Yardım menüsü Klavye kısayolları + Güncellemeleri denetle + Hakkında (Birlikte aç yönetimi Tercihler'e taşındı)", [a.text() for a in yardim.actions() if not a.isSeparator()] == ["Klavye kısayolları", "Güncellemeleri denetle…", "Hakkında"]
       and not any("Birlikte aç" in t for t in names_now))
 called = []
 w._register_open_with = lambda: called.append("ekle")

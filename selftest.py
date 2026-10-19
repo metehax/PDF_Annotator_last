@@ -10,7 +10,7 @@ import time
 import appinfo
 
 MODULES = [
-    "a11y", "convert", "crashguard", "digisign", "docsec", "fonts", "forms", "gizmo", "headfoot", "main_window",
+    "a11y", "appinfo", "updater", "mw_update", "convert", "crashguard", "digisign", "docsec", "fonts", "forms", "gizmo", "headfoot", "main_window",
     "models", "mw_annot", "mw_build", "mw_common", "mw_compare", "mw_doctools", "mw_export", "mw_forms",
     "mw_nav", "mw_notes", "mw_ocr", "mw_pages", "mw_share", "mw_sign", "mw_workspace", "ocr", "pdf_engine",
     "pii", "qrshare", "scan", "sharing", "textdiff", "views", "workflow", "workspace",

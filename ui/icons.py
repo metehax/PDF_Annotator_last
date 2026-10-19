@@ -123,6 +123,7 @@ _PATHS: Dict[str, str] = {
     "one_to_one": '<rect x="3" y="5" width="18" height="14" rx="2"/><path d="M8 10l2-1.5V15M14 9v6M17 9v6"/>',
     "flatten": '<path d="M3 8l9-4 9 4-9 4z"/><path d="M3 15l9 4 9-4"/>',
     "share": '<circle cx="6" cy="12" r="2.5"/><circle cx="18" cy="6" r="2.5"/><circle cx="18" cy="18" r="2.5"/><path d="M8.2 10.8l7.6-3.6M8.2 13.2l7.6 3.6"/>',
+    "update": '<path d="M12 4v10"/><path d="M8 10l4 4 4-4"/><path d="M5 19h14"/>',
     "app": '<path d="M14 3H7a2 2 0 0 0-2 2v14a2 2 0 0 0 2 2h10a2 2 0 0 0 2-2V8z"/><path d="M14 3v5h5"/><path d="M9 15.5l2-2 4 4"/><path d="M9 12h3"/>',
 }
 
