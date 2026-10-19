@@ -1,6 +1,7 @@
 import os, sys, tempfile, time, json, socket, http.client, urllib.request, urllib.error
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "src"))
 os.chdir(ROOT)
 import pymupdf as fitz
 

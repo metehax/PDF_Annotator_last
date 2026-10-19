@@ -3,8 +3,9 @@ import os
 import sys
 
 os.environ.setdefault("QT_QPA_PLATFORM", "offscreen")
-ROOT = os.path.dirname(os.path.abspath(__file__))
-sys.path.insert(0, ROOT)
+HERE = os.path.dirname(os.path.abspath(__file__))
+ROOT = os.path.dirname(HERE)
+sys.path.insert(0, os.path.join(ROOT, "src"))
 
 from PySide6.QtCore import QBuffer, QByteArray, QIODevice, QRectF, Qt
 from PySide6.QtGui import QBrush, QColor, QGuiApplication, QImage, QPainter
@@ -40,7 +41,7 @@ def main():
         buf.open(QIODevice.OpenModeFlag.WriteOnly)
         render(s).save(buf, "PNG")
         ims.append(Image.open(io.BytesIO(bytes(ba))).convert("RGBA"))
-    ims[-1].save(os.path.join(ROOT, "app.ico"), format="ICO", sizes=[(s, s) for s in sizes], append_images=ims[:-1])
+    ims[-1].save(os.path.join(HERE, "app.ico"), format="ICO", sizes=[(s, s) for s in sizes], append_images=ims[:-1])
     print("app.ico yazildi")
 
 

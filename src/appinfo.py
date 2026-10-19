@@ -16,10 +16,17 @@ def frozen() -> bool:
 
 
 def app_dir() -> str:
-    """Kaynak dosyaların (tessdata/, fonts/) bulunduğu klasör; PyInstaller'da paket içi `_internal`."""
+    """Kaynak klasörü (`src/`); PyInstaller'da paket içi `_internal`."""
     if frozen():
         return getattr(sys, "_MEIPASS", os.path.dirname(sys.executable))
     return os.path.dirname(os.path.abspath(__file__))
+
+
+def resource_dir() -> str:
+    """`tessdata/` ve `fonts/` klasörlerinin üst klasörü: kaynakta `<depo>/resources`, PyInstaller'da `_internal`."""
+    if frozen():
+        return app_dir()
+    return os.path.join(os.path.dirname(app_dir()), "resources")
 
 
 def version_tuple():

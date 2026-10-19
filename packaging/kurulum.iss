@@ -22,7 +22,7 @@ PrivilegesRequiredOverridesAllowed=dialog
 UninstallDisplayIcon={app}\{#AppExe}
 UninstallDisplayName={#AppName}
 SetupIconFile=app.ico
-OutputDir=dist
+OutputDir=..\dist
 OutputBaseFilename=PDF-Annotator-Setup-{#AppVersion}
 VersionInfoVersion={#AppVersion}
 Compression=lzma2/max
@@ -43,9 +43,9 @@ Name: "desktopicon"; Description: "{cm:CreateDesktopIcon}"; Flags: unchecked
 Name: "assoc"; Description: "PDF ve resim dosyaları için ""Birlikte aç"" listesine {#AppName} ekle"; Flags: unchecked
 
 [Files]
-Source: "dist\{#AppName}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "selftest.txt"
+Source: "..\dist\{#AppName}\*"; DestDir: "{app}"; Flags: recursesubdirs createallsubdirs ignoreversion; Excludes: "selftest.txt"
 ; VC++ çalışma zamanı: PyInstaller DLL'leri getirir; yine de gerekirse vc_redist.x64.exe'yi build klasörüne koyun
-Source: "vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
+Source: "..\vc_redist.x64.exe"; DestDir: "{tmp}"; Flags: deleteafterinstall skipifsourcedoesntexist
 
 [Icons]
 Name: "{autoprograms}\{#AppName}"; Filename: "{app}\{#AppExe}"

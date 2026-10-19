@@ -2,6 +2,7 @@ import hashlib, json, os, sys, tempfile, threading
 from http.server import BaseHTTPRequestHandler, HTTPServer
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "src"))
 os.chdir(ROOT)
 ok = []
 

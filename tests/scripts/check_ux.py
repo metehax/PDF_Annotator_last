@@ -1,6 +1,7 @@
 import os, sys, tempfile, time
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "src"))
 os.chdir(ROOT)
 os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 SP = tempfile.gettempdir()
@@ -479,7 +480,7 @@ if sys.platform == "win32":
     pd.btn_openwith_del.click()
     check("düğmeler ana pencere işlevlerini çağırır", called == ["ekle", "kaldir"], str(called))
 pd.close()
-src = open(os.path.join(ROOT, "mw_build.py"), encoding="utf-8").read()
+src = open(os.path.join(ROOT, "src", "mw_build.py"), encoding="utf-8").read()
 rows = re.findall(r'A\(\s*(\w+),\s*(None|"[a-z_0-9]+"),\s*"([^"]+)"', src)
 noicon = [t for _, i, t in rows if i == "None"]
 check("tüm menü eylemlerinin ikonu var", not noicon, str(noicon))

@@ -3,11 +3,30 @@
 Tek dosyalık prototipin (`pdf_annotator.py`) modüler, performanslı bir
 PySide6 + PyMuPDF masaüstü uygulamasına dönüştürülmüş hâli.
 
-## Kurulum ve çalıştırma
+## Nasıl kurulur (kullanıcılar için)
+1. GitHub'da bu deponun **Releases** bölümünü açın, en son sürümün **Assets** listesinden `PDF-Annotator-Setup-<sürüm>.exe` dosyasını indirin.
+2. Çift tıklayın. Windows "bilinmeyen yayıncı" uyarısı verirse **Daha fazla bilgi → Yine de çalıştır** deyin (kurucu henüz imzalı değil).
+3. Sihirbazı bitirin; Başlat menüsünden **PDF Annotator**'ı açın. Python kurmanız gerekmez.
+Kaldırma: Ayarlar → Uygulamalar → PDF Annotator.
+
+## Klasör yapısı
+```
+PDF_Annotator/
+├─ src/            uygulama kodu (main_window.py, mw_*.py, çekirdek modüller) ve src/ui/ (pencereler, tema, ikonlar)
+├─ resources/      fonts/ (Roboto) ve tessdata/ (OCR dil dosyaları: tur + eng, kur.bat indirir)
+├─ tests/          pytest + tests/scripts/check_*.py aşama denetimleri
+├─ tools/          make_release.py (yayın dosyaları), kurulum_dene.ps1 (kurucu denetimi)
+├─ packaging/      pdfannotator.spec (PyInstaller), kurulum.iss (Inno Setup), app.ico, make_icon.py, pyi_hooks/
+├─ docs/           YOLHARITASI, YAYIN, UX/Sağlamlık raporları
+├─ kur.bat · calistir.bat · calistir_konsol.bat · build.bat      (çift tıklanan betikler)
+└─ requirements.txt · requirements-dev.txt · pytest.ini · README.md · CLAUDE.md
+```
+
+## Kurulum ve çalıştırma (geliştiriciler)
 
 **Windows (önerilen):** `kur.bat` dosyasına çift tıklayın (bir kez). Sanal ortam
 kurar, gereksinimleri yükler, OCR için `tur` + `eng` dil dosyalarını
-`tessdata/` klasörüne indirir ve masaüstüne "PDF Annotator" kısayolu koyar.
+`resources/tessdata/` klasörüne indirir ve masaüstüne "PDF Annotator" kısayolu koyar.
 Sonra uygulamayı `calistir.bat` ya da masaüstü kısayoluyla açın
 (hata görmek için `calistir_konsol.bat`).
 
@@ -15,7 +34,7 @@ Elle kurulum:
 
 ```bash
 pip install -r requirements.txt
-python main_window.py
+python src/main_window.py
 ```
 
 Windows'ta Türkçe karakterler için `pdf_engine.find_unicode_font()`

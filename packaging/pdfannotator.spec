@@ -6,8 +6,10 @@ from PyInstaller.utils.hooks import collect_data_files, collect_submodules
 from PyInstaller.utils.win32.versioninfo import (
     FixedFileInfo, StringFileInfo, StringStruct, StringTable, VarFileInfo, VarStruct, VSVersionInfo)
 
-ROOT = os.path.abspath(SPECPATH)
-sys.path.insert(0, ROOT)
+HERE = os.path.abspath(SPECPATH)            # packaging/
+ROOT = os.path.dirname(HERE)
+SRC = os.path.join(ROOT, "src")
+sys.path.insert(0, SRC)
 import appinfo
 
 v = appinfo.version_tuple()
@@ -27,8 +29,8 @@ version_info = VSVersionInfo(
     ])
 
 datas = [
-    (os.path.join(ROOT, "tessdata"), "tessdata"),
-    (os.path.join(ROOT, "fonts"), "fonts"),
+    (os.path.join(ROOT, "resources", "tessdata"), "tessdata"),
+    (os.path.join(ROOT, "resources", "fonts"), "fonts"),
 ]
 datas += collect_data_files("pdf2docx")
 datas += collect_data_files("pyhanko")
@@ -54,9 +56,9 @@ excludes = ["pymupdf.layout", "pymupdf4llm", "onnxruntime", "tkinter", "matplotl
             "PySide6.QtWebEngineCore", "PySide6.QtWebEngineWidgets", "PySide6.Qt3DCore", "PySide6.QtQuick",
             "PySide6.QtQml", "PySide6.QtMultimedia", "PySide6.QtCharts", "PySide6.QtDataVisualization"]
 
-a = Analysis([os.path.join(ROOT, "main_window.py")], pathex=[ROOT], binaries=binaries, hookspath=[os.path.join(ROOT, "pyi_hooks")], datas=datas, hiddenimports=hiddenimports,
+a = Analysis([os.path.join(SRC, "main_window.py")], pathex=[SRC], binaries=binaries, hookspath=[os.path.join(HERE, "pyi_hooks")], datas=datas, hiddenimports=hiddenimports,
              excludes=excludes, noarchive=False)
 pyz = PYZ(a.pure)
 exe = EXE(pyz, a.scripts, [], exclude_binaries=True, name=appinfo.APP_NAME, console=False,
-          icon=os.path.join(ROOT, "app.ico"), version=version_info, upx=False)
+          icon=os.path.join(HERE, "app.ico"), version=version_info, upx=False)
 coll = COLLECT(exe, a.binaries, a.datas, strip=False, upx=False, name=appinfo.APP_NAME)

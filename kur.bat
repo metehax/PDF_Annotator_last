@@ -26,12 +26,12 @@ echo [2/4] Gereksinimler kuruluyor (PySide6, PyMuPDF, Pillow)...
 if errorlevel 1 goto :hata
 
 echo [3/4] OCR dil dosyalari (Turkce + Ingilizce) kontrol ediliyor...
-if not exist "tessdata" mkdir "tessdata"
+if not exist "resources\tessdata" mkdir "resources\tessdata"
 call :indir tur
 call :indir eng
 
 echo [4/4] Masaustu kisayolu olusturuluyor...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $d=[Environment]::GetFolderPath('Desktop'); $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'PDF Annotator.lnk')); $s.TargetPath=(Resolve-Path '.venv\Scripts\pythonw.exe').Path; $s.Arguments='main_window.py'; $s.WorkingDirectory=(Get-Location).Path; $s.Save() } catch { exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { $d=[Environment]::GetFolderPath('Desktop'); $s=(New-Object -ComObject WScript.Shell).CreateShortcut((Join-Path $d 'PDF Annotator.lnk')); $s.TargetPath=(Resolve-Path '.venv\Scripts\pythonw.exe').Path; $s.Arguments='src\main_window.py'; $s.WorkingDirectory=(Get-Location).Path; $s.Save() } catch { exit 1 }"
 if errorlevel 1 echo Kisayol olusturulamadi, calistir.bat dosyasini kullanabilirsiniz.
 
 echo.
@@ -41,12 +41,12 @@ pause
 exit /b 0
 
 :indir
-if exist "tessdata\%1.traineddata" goto :eof
+if exist "resources\tessdata\%1.traineddata" goto :eof
 echo    %1.traineddata indiriliyor...
-powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/tesseract-ocr/tessdata_fast/raw/main/%1.traineddata' -OutFile 'tessdata\%1.traineddata' } catch { exit 1 }"
+powershell -NoProfile -ExecutionPolicy Bypass -Command "try { [Net.ServicePointManager]::SecurityProtocol=[Net.SecurityProtocolType]::Tls12; Invoke-WebRequest -UseBasicParsing -Uri 'https://github.com/tesseract-ocr/tessdata_fast/raw/main/%1.traineddata' -OutFile 'resources\tessdata\%1.traineddata' } catch { exit 1 }"
 if errorlevel 1 (
-  echo    UYARI: %1.traineddata indirilemedi. OCR icin bu dosyayi tessdata klasorune elle koyun.
-  if exist "tessdata\%1.traineddata" del "tessdata\%1.traineddata"
+  echo    UYARI: %1.traineddata indirilemedi. OCR icin bu dosyayi resources\tessdata klasorune elle koyun.
+  if exist "resources\tessdata\%1.traineddata" del "resources\tessdata\%1.traineddata"
 )
 goto :eof
 

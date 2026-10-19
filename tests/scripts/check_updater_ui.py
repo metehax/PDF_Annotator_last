@@ -2,6 +2,7 @@ import hashlib, json, os, sys, tempfile, threading, time
 from http.server import BaseHTTPRequestHandler, HTTPServer
 ROOT = os.path.dirname(os.path.dirname(os.path.dirname(os.path.abspath(__file__))))
 sys.path.insert(0, ROOT)
+sys.path.insert(0, os.path.join(ROOT, "src"))
 os.chdir(ROOT)
 os.environ.setdefault("QT_QPA_PLATFORM", "windows")
 tmp = tempfile.mkdtemp(prefix="k3ui_")
@@ -68,7 +69,8 @@ toasts = []
 w.toasts.show = lambda text, kind="success", *a, **k: toasts.append(text)
 
 # adres yok → kapalı
-check("varsayılan adres boş", appinfo.UPDATE_URL == "")
+check("üretim adresi GitHub (https)", appinfo.UPDATE_URL.startswith("https://api.github.com/repos/"))
+appinfo.UPDATE_URL = ""                    # adres yoksa davranışı sınamak için
 w.check_updates(manual=True)
 check("adres yoksa 'tanımlı değil'", any("tanımlı değil" in t for t in toasts))
 w.auto_check_updates()

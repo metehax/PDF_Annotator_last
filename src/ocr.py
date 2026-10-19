@@ -19,9 +19,9 @@ from typing import Callable, Dict, List, Optional, Tuple
 
 import pymupdf as fitz
 
-from appinfo import app_dir
+from appinfo import resource_dir
 
-APP_TESSDATA = os.path.join(app_dir(), "tessdata")
+APP_TESSDATA = os.path.join(resource_dir(), "tessdata")
 PREFERRED_LANGS = ["tur", "eng"]
 DEFAULT_DPI = 300
 
