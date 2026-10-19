@@ -1326,9 +1326,12 @@ class ComparePane(QWidget):
         self.gview.setBackgroundBrush(QColor(ui_theme.current()["canvas"]))
         current_transform = self.gview.transform()
         self.scene.clear()
+        if self.session is not None and getattr(self.session.pdf, "_closed", False):
+            self.session = None                  # sekme kapandı: kapanmış belgeye erişme
         if not self.session:
             self.lbl.setText("0 / 0")
             return
+        self.page = min(self.page, max(0, self.session.pdf.page_count - 1))
         invert = self.night_mode_provider()
         pix = self.session.pdf.render_pixmap(self.page, invert=invert)
         item = self.scene.addPixmap(pix)

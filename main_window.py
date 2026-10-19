@@ -16,7 +16,7 @@ import os
 import sys
 from typing import Dict, List, Optional, Tuple
 
-from PySide6.QtCore import QEvent, QPointF, QSettings, Qt, QThreadPool, QTimer, QUrl
+from PySide6.QtCore import QEvent, QObject, QPointF, QSettings, Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QUndoGroup
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
@@ -29,6 +29,7 @@ from fonts import register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon
 import docsec
+import crashguard
 import workspace
 from ui.palette import Command, CommandPalette
 from ui.signatures import SignatureLibrary
@@ -926,7 +927,9 @@ class MainWindow(
             self._drop_draft(s)                  # normal kapanış: kurtarma taslağı gerekmez
         share = getattr(self, "_share_dialog", None)
         if share is not None:
-            share.close()                        # telefon aktarım sunucusu durur
+            share.stop()                         # sunucu kapalı/gizli pencerede de durur (closeEvent gelmeyebilir)
+            share.close()
+        self.shutdown_background()              # zamanlayıcılar durur, arka plan işleri beklenir
         self.settings.setValue("geometry", self.saveGeometry())
         self.settings.setValue("sidePanelOpen", self.side.is_open() or not self.sessions and self._side_was_open)
         for s in self.sessions:
@@ -996,6 +999,11 @@ def _listen_for_instances(win):
     return server
 
 
+class _ErrorBridge(QObject):
+    """Başka iş parçacığındaki hata bildirimini ana iş parçacığına taşır (kuyruklu sinyal)."""
+    raised = Signal(str, str)
+
+
 def main():
     app = QApplication(sys.argv)
     files = [os.path.abspath(a) for a in sys.argv[1:] if os.path.isfile(a)]
@@ -1008,6 +1016,9 @@ def main():
         app.installTranslator(translator)
     register_app_fonts()
     win = MainWindow()
+    bridge = win._error_bridge = _ErrorBridge(win)
+    bridge.raised.connect(win.on_unexpected_error)
+    crashguard.install(lambda ozet, yol: bridge.raised.emit(ozet, yol))
     win._instance_server = _listen_for_instances(win)
     win.show()
     if files:

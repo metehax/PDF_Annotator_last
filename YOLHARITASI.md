@@ -108,6 +108,13 @@ Tamamlananlar: B, C1, C2, D1, D2, E, F, G1–G3, H1, H2, J1–J3, testler. Eski 
 **I5b (uygulama):** kullanıcının onayladığı en yüksek 5–8 madde (olası örnekler: alt menülere gruplama, boş durum ipuçları/ilk kullanım turu, araç ipuçlarında kısayol, durum çubuğu geri bildirimi, geri alınabilir düzeltmeler, klavye erişimi, yüksek DPI/kontrast).
 **Bitti ölçütü:** I5a: rapor + deneme listesi commit'li; I5b: seçilen maddeler + ilgili check betikleri + tam pytest; tek ekran görüntüsü (sonda).
 
+## S1 — Sağlamlık (çökme avı; K1'den önce)
+**Amaç:** davranış değişmeden çökme/donma/veri kaybı riskini azalt.
+- `crashguard.py`: `sys.excepthook` + `threading.excepthook` + Qt ileti işleyicisi + `faulthandler`; günlük `<çalışma klasörü>\Gunlukler\pdfannotator.log` (dönen, ~1 MB x 3); yakalanmamış hata uygulamayı kapatmaz → Türkçe uyarı (toast + "Günlüğü aç"), aynı hata 60 sn içinde tekrar uyarmaz, taslak hemen yazılır.
+- `tests/scripts/check_robustness.py`: bozuk/boş/parolalı/dev dosyalar, kapanışta arka plan işleri, belgesiz eylemler, geri al sınırları, yazma hataları.
+- Çıktı: `SAGLAMLIK_RAPOR.md` (kritik/orta/düşük, tekrar adımı, durum); kritik+orta düzeltilir (≤~15), her biri için regresyon kontrolü.
+**Bitti ölçütü:** tam pytest yeşil; README ve CLAUDE.md'de günlük konumu notu.
+
 ## K1 — Sürüm 1.0.0, PyInstaller derlemesi, kendi kendini sınama
 **Başlangıç:** bu aşamada yayın sürümü **1.0.0** olur.
 **Yapılacak**

@@ -467,3 +467,6 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 * **Adlar ve ikonlar:** benzer adlar ayrıştırıldı ("Fotoğraftan belge tara…", "Sayfaları tarayıcıda düzelt…", "Sayfa kenarlarını kırp…", "Metin farkını göster"); menü
   eylemlerinin hepsinde ikon var ve hiçbir ikon 3'ten fazla eylemde tekrar etmiyor (yeni ikonlar: posta, bulut, klasör aç, ayarlar, dönüştür, böl…); etiketler ≤ 40 karakter.
   **Birlikte aç** yönetimi Yardım'dan Tercihler'e taşındı.
+
+## Hata günlüğü (sağlamlık)
+Beklenmeyen hatalar uygulamayı kapatmaz; `Belgeler\PDF Annotator\Gunlukler\pdfannotator.log` dosyasına yazılır (yerel çökme izi: `yerel_cokme.log`). Uyarıdaki "Günlüğü aç" düğmesi klasörü açar. Hata bildirirken bu dosyayı ekleyin.

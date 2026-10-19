@@ -14,9 +14,11 @@ import tempfile
 import uuid
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import QTimer
+from PySide6.QtCore import QThreadPool, QTimer, QUrl
+from PySide6.QtGui import QDesktopServices
 from PySide6.QtWidgets import QMessageBox
 
+import crashguard
 import workspace
 from models import DocumentSession
 from pdf_engine import PDFDocument
@@ -83,6 +85,33 @@ class WorkspaceMixin:
         box.exec()
         c = box.clickedButton()
         return "move" if c is b_move else "never" if c is b_never else "later"
+
+    # -- güvenlik ağı: beklenmeyen hata / kapanış ---------------------------------
+    def on_unexpected_error(self, ozet: str, log_yolu: str) -> None:
+        """Yakalanmamış hata (crashguard): çalışma taslağını hemen yazar, sade bir uyarı gösterir."""
+        try:
+            self._autosave_drafts()
+        except Exception:
+            pass
+        self._last_error = (ozet, log_yolu)
+        self.toasts.show("Beklenmeyen bir hata oldu, kaydedildi. Çalışmanızı kaydetmeniz önerilir.",
+                         "error", action=("Günlüğü aç", lambda: self.open_log()), timeout_ms=15000)
+
+    def open_log(self) -> None:
+        d = crashguard.log_dir()
+        QDesktopServices.openUrl(QUrl.fromLocalFile(d))
+
+    def shutdown_background(self) -> None:
+        """Kapanışta: zamanlayıcıları durdurur, havuzdaki işleri bekler (çıkışta iş parçacığı çökmesini önler)."""
+        for name in ("_recovery_timer", "_thumb_timer", "_diff_timer", "_page_bar_timer"):
+            t = getattr(self, name, None)
+            if t is not None:
+                try:
+                    t.stop()
+                except RuntimeError:
+                    pass
+        self._diff_token = getattr(self, "_diff_token", 0) + 1       # bayat sonuçlar elenir
+        QThreadPool.globalInstance().waitForDone(3000)
 
     # -- otomatik kurtarma: yazma ------------------------------------------------
     def start_recovery(self):

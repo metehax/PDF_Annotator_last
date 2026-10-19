@@ -42,6 +42,7 @@ from models import (
 LRU_CACHE_SIZE = 10          # Render önbelleğinde tutulacak azami sayfa sayısı
 IMAGE_EXTS = (".png", ".jpg", ".jpeg", ".bmp", ".gif", ".tif", ".tiff", ".webp")
 IMAGE_PAGE_MAX_PT = 1600.0    # Resimden üretilen sayfanın en uzun kenarı (pt)
+MAX_PIXELS = 60_000_000      # tek render için piksel üst sınırı (MuPDF 'Overly large image' hatası)
 RENDER_SCALE = 2.0            # Ekran önizleme render çarpanı
 
 
@@ -191,6 +192,21 @@ class RenderSignals(QObject):
     failed = Signal(int, str)
 
 
+def _log_skip(what: str, ex: Exception) -> None:
+    """Sessizce atlanan (ama yutulmaması gereken) hatayı günlüğe yazar."""
+    try:
+        import crashguard
+        crashguard.get_logger().warning("%s yazılamadı, atlandı: %s", what, ex)
+    except Exception:
+        pass
+
+
+def clamp_scale(rect, scale: float) -> float:
+    """Sayfa `rect` (pt) `scale` ile `MAX_PIXELS`'i aşacaksa ölçeği küçültür."""
+    area = max(1.0, rect.width * rect.height) * scale * scale
+    return scale if area <= MAX_PIXELS else (MAX_PIXELS / max(1.0, rect.width * rect.height)) ** 0.5
+
+
 class PageRenderTask(QRunnable):
     """Bir sayfayı arka plan iş parçacığında piksellere dönüştürür.
 
@@ -310,6 +326,9 @@ class PDFDocument:
             if not password or not self.doc.authenticate(password):
                 self.doc.close()
                 raise PasswordRequired(wrong=bool(password))
+        if self.doc.page_count == 0:                 # sayfasız belge görünümü/işlemleri bozar
+            self.doc.close()
+            raise ValueError("Belgede hiç sayfa yok.")
         self.lock = threading.RLock()          # MuPDF thread-safety koruması
         self._pix_cache = LRUCache(LRU_CACHE_SIZE)
         self._thumb_cache = LRUCache(64)
@@ -367,6 +386,7 @@ class PDFDocument:
         üzerinden arka planda çağırın."""
         with self.lock:
             page = self.doc[index]
+            scale = clamp_scale(page.rect, scale)
             pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             if invert:
                 pix.invert_irect()
@@ -406,6 +426,7 @@ class PDFDocument:
             return cached
         with self.lock:
             page = self.doc[index]
+            scale = clamp_scale(page.rect, scale)
             pix = page.get_pixmap(matrix=fitz.Matrix(scale, scale), alpha=False)
             img = QImage(pix.samples, pix.width, pix.height, pix.stride,
                          QImage.Format.Format_RGB888).copy()
@@ -561,8 +582,8 @@ class PDFDocument:
     def content_bbox(self, index: int, margin: float = 6.0) -> Optional["fitz.Rect"]:
         """Sayfadaki beyaz olmayan içeriğin sınırı (görünen koordinat); boşsa None."""
         from PIL import Image, ImageChops
-        z = 0.5
         with self.lock:
+            z = clamp_scale(self.doc[index].rect, 0.5)
             pix = self.doc[index].get_pixmap(matrix=fitz.Matrix(z, z), alpha=False)
             page_rect = self.doc[index].rect
         im = Image.frombytes("RGB", (pix.width, pix.height), pix.samples)
@@ -639,8 +660,21 @@ class PDFDocument:
         from docsec import apply_compression, save_kwargs
         kwargs = apply_compression(tmp, compress)
         kwargs.update(save_kwargs(security))
-        tmp.save(out_path, **kwargs)
-        tmp.close()
+        part = out_path + ".part"             # önce geçici dosya: disk dolu/hata olursa özgün hedef bozulmaz
+        try:
+            tmp.save(part, **kwargs)
+            tmp.close()
+            os.replace(part, out_path)
+        except BaseException:
+            try:
+                tmp.close()
+            except Exception:
+                pass
+            try:
+                os.remove(part)
+            except OSError:
+                pass
+            raise
 
     def export_image(self, index: int, page_annotations, font_ctx, out_path: str,
                       zoom: Optional[float] = None) -> None:
@@ -648,6 +682,7 @@ class PDFDocument:
             # Resim kaynaklıysa orijinal çözünürlükte, PDF ise 3x
             zoom = self.native_zoom if self.is_image else 3.0
         tmp = self._annotated_copy({index: page_annotations}, font_ctx)
+        zoom = clamp_scale(tmp[index].rect, zoom)
         pix = tmp[index].get_pixmap(matrix=fitz.Matrix(zoom, zoom), alpha=False)
         tmp.close()
         ext = os.path.splitext(out_path)[1].lower()
@@ -695,8 +730,8 @@ def _draw_watermark_item(page: "fitz.Page", config: WatermarkConfig, font_ctx, c
                                   fontfile=font_ctx[1], **kwargs)
             else:
                 page.insert_text(baseline, config.text, fontname="helv", **kwargs)
-        except Exception:
-            pass
+        except Exception as ex:
+            _log_skip("filigran metni", ex)
     else:
         if not config.image_bytes:
             return
@@ -710,8 +745,8 @@ def _draw_watermark_item(page: "fitz.Page", config: WatermarkConfig, font_ctx, c
         rect = fitz.Rect(cx - rw / 2, cy - rh / 2, cx + rw / 2, cy + rh / 2)
         try:
             page.insert_image(rect, stream=stream, keep_proportion=False, overlay=True)
-        except Exception:
-            pass
+        except Exception as ex:
+            _log_skip("filigran resmi", ex)
 
 
 def _draw_tiled_watermark(page: "fitz.Page", config: WatermarkConfig, font_ctx) -> None:
