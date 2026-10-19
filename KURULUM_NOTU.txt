@@ -1,0 +1,11 @@
+PDF Annotator (PDF İşaretleme Aracı)
+
+PDF ve resimler için işaretleme, düzenleme, OCR, filigran, karşılaştırma, form, imza ve
+dönüştürme aracı. Belgeleriniz bilgisayarınızdan çıkmaz.
+
+Kurulum notları
+- Kullanıcı başına (yönetici izni gerekmez) ya da tüm kullanıcılar için kurabilirsiniz.
+- İmzasız kurucuda Windows "Bilinmeyen yayıncı" uyarısı gösterebilir:
+  "Daha fazla bilgi" -> "Yine de çalıştır".
+- Kaldırma: Ayarlar -> Uygulamalar (ya da Denetim Masası -> Program Ekle/Kaldır).
+  Belgeleriniz ve çalışma klasörünüz size sorulmadan silinmez.

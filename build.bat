@@ -16,22 +16,33 @@ if not exist "tessdata\eng.traineddata" goto :notess
 
 rem Temiz derleme ortami: .venv'e dokunmaz
 if exist ".buildvenv" rmdir /s /q ".buildvenv"
-echo [1/5] Derleme ortami kuruluyor...
+echo [1/6] Derleme ortami kuruluyor...
 %PY% -m venv .buildvenv || goto :hata
 set "VP=.buildvenv\Scripts\python.exe"
 "%VP%" -m pip install --upgrade pip >nul || goto :hata
-echo [2/5] Gereksinimler kuruluyor...
+echo [2/6] Gereksinimler kuruluyor...
 "%VP%" -m pip install -r requirements.txt pyinstaller || goto :hata
-echo [3/5] Simge uretiliyor...
+echo [3/6] Simge uretiliyor...
 "%VP%" make_icon.py || goto :hata
-echo [4/5] Derleniyor...
+echo [4/6] Derleniyor...
 if exist "build" rmdir /s /q "build"
 if exist "dist" rmdir /s /q "dist"
 "%VP%" -m PyInstaller --noconfirm --clean pdfannotator.spec || goto :hata
-echo [5/5] Kendi kendini sinama (--selftest)...
+echo [5/6] Kendi kendini sinama (--selftest)...
 "dist\PDF Annotator\PDF Annotator.exe" --selftest "dist\PDF Annotator\selftest.txt"
 if errorlevel 1 (type "dist\PDF Annotator\selftest.txt" & goto :hata)
 type "dist\PDF Annotator\selftest.txt"
+echo [6/6] Kurucu (Inno Setup)...
+set "ISCC="
+for %%P in ("%LOCALAPPDATA%\Programs\Inno Setup 6\ISCC.exe" "%ProgramFiles(x86)%\Inno Setup 6\ISCC.exe" "%ProgramFiles%\Inno Setup 6\ISCC.exe") do if exist %%P set "ISCC=%%~P"
+if not defined ISCC (echo UYARI: Inno Setup 6 yok; kurucu atlandi ^(winget install JRSoftware.InnoSetup^). & goto :bitti)
+"%VP%" -c "import appinfo;print(appinfo.VERSION)" > build\ver.txt
+set /p APPVER=<build\ver.txt
+"%VP%" -c "import appinfo;print(appinfo.APP_ID.strip(chr(123)+chr(125)))" > build\id.txt
+set /p APPGUID=<build\id.txt
+"%ISCC%" /Qp "/DAppVersion=%APPVER%" "/DAppGuid=%APPGUID%" kurulum.iss || goto :hata
+powershell -NoProfile -Command "Get-FileHash 'dist\PDF-Annotator-Setup-%APPVER%.exe' -Algorithm SHA256 | ForEach-Object { 'SHA-256: ' + $_.Hash }"
+:bitti
 echo.
 echo Tamam: dist\PDF Annotator\PDF Annotator.exe
 exit /b 0

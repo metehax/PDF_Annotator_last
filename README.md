@@ -476,3 +476,10 @@ Beklenmeyen hatalar uygulamayı kapatmaz; `Belgeler\PDF Annotator\Gunlukler\pdfa
 - `build.bat` → temiz `.buildvenv` kurar (Python 3.12 varsa onu seçer), `requirements.txt` + PyInstaller, `app.ico` üretir (`make_icon.py`), `pdfannotator.spec` ile **onedir** derler, sonda `--selftest` çalıştırır. Çıktı: `dist\PDF Annotator\PDF Annotator.exe` (Python kurulu olmayan bilgisayarda çalışır; `tessdata\tur+eng` gerekir).
 - `PDF Annotator.exe --selftest [dosya]`: pencere açmadan modülleri, tessdata/fontları, ikonları, render, OCR, Word/Excel, QR ve tarama çekirdeğini sınar; sonucu `selftest.txt`a yazar, hata varsa çıkış kodu 1.
 - `pyi_hooks/hook-workflow.py` boş kancadır: `pyinstaller-hooks-contrib` aynı adlı bir PyPI paketi için kanca taşıdığından `workflow.py` ile çakışırdı. `pymupdf.layout`/`onnxruntime` pakete alınmaz (gerekmez, model dosyası eksik kalıp açılışı çökertir).
+
+## Kurucu (K2)
+`build.bat` sonunda Inno Setup 6 (`winget install JRSoftware.InnoSetup`) ile `kurulum.iss` derlenir → `dist\PDF-Annotator-Setup-<sürüm>.exe`, SHA-256 yazdırılır. Sürüm ve GUID `appinfo.py`'den gelir.
+- Kullanıcı başına (yönetici izni yok) ya da tüm kullanıcılar için kurulur; Başlat menüsü, isteğe bağlı masaüstü kısayolu ve "Birlikte aç" kaydı; Program Ekle/Kaldır'da görünür. Kaldırırken ayarlar/çalışma klasörünün silinmesi sorulur (varsayılan Hayır; sessiz kaldırmada dokunulmaz).
+- **SmartScreen:** kurucu kod imzalı değilse Windows "bilinmeyen yayıncı" uyarısı verir → *Daha fazla bilgi → Yine de çalıştır*.
+- Otomatik doğrulama: `powershell -ExecutionPolicy Bypass -File tools\kurulum_dene.ps1` (sessiz kur, `--selftest`, kaldır, izleri denetle).
+- **Başka bilgisayarda deneme listesi:** kurulum · Başlat menüsünde görünme · PDF aç · OCR · Word'e dönüştür · QR ile telefondan al · Ayarlar → Uygulamalar'dan kaldır (klasör ve girdi gitmeli).
