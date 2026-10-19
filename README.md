@@ -79,8 +79,8 @@ Türkçe karakterler PDF çıktısında görünmeyebilir).
 | `ui/scanner.py` | **Belge tara** penceresi: köşe kulpları (otomatik + elle), filtre kartları, parlaklık/kontrast, döndür, sayfa şeridi, PDF/OCR üretimi |
 | `ui/imgpdf.py`  | **Görselleri PDF'e çevir** penceresi: sürükle-bırak, sıralama, sayfa boyutu/yön/kenar boşluğu/kalite, tek ya da ayrı PDF |
 | `workspace.py`  | **Çalışma klasörü + otomatik kurtarma çekirdeği:** kök/alt klasörler (Gelen, Taramalar, Donusturulenler, Projeler, Yedekler, IsAkisi), çıktı tercihleri, son klasör, eski gelen klasörü taşıma, kurtarma taslakları |
-| `ui/preferences.py` | **Tercihler** penceresi (Düzenle → Tercihler…, Ctrl+,) |
-| `sharing.py`    | **Paylaşım yardımcıları:** yerel bulut klasörü algılama (OneDrive/Google Drive/Dropbox), e-posta (Outlook ekli ya da klasör + mailto), konumu aç |
+| `ui/preferences.py` | **Ayarlar** penceresi (üst çubukta ⚙ Ayarlar, Düzenle → Ayarlar…, Ctrl+,) |
+| `sharing.py`    | **Paylaşım yardımcıları:** yerel bulut klasörü algılama (OneDrive/Google Drive/Dropbox), konumu aç |
 | `qrshare.py`    | **QR ile telefon aktarımı** çekirdeği: anahtarlı yerel HTTP sunucusu (yükleme/indirme), telefon sayfası, QR (segno), isteğe bağlı 6 haneli PIN + kilit |
 | `ui/share.py`   | "Telefonla aktar (QR)" penceresi: QR, gelenler listesi, belgeyi telefona sunma |
 | `ui/convert.py` | Dönüştürme penceresi + arka plan iş sınıfı (`BackgroundJob`) |
@@ -419,7 +419,7 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 * **Telefonla aktar (QR) → "Gelen fotoğrafları tarayıcıda aç":** gelen fotoğraflar belge olarak açılmaz, birikir; **Taramayı bitir (N)** hepsini Belge tara penceresinde açar. PDF'ler eskisi gibi açılır.
 
 ## Yeni: Tercihler, çalışma klasörü ve otomatik kurtarma
-**Düzenle → Tercihler… (Ctrl+,)** değişiklikleri anında kaydeder.
+**Ayarlar** (üst çubuk ya da Ctrl+,) değişiklikleri anında kaydeder; soldan kategori seçilir: Genel · Görünüm · Çalışma klasörü · Tarama · Telefon aktarımı · Güncelleme · Kısayollar.
 
 * **Çalışma klasörü:** varsayılan `Belgeler\PDF Annotator`; Seç / Aç / Sıfırla. Altında `Gelen` (QR ile gelenler), `Taramalar`,
   `Donusturulenler` (Word/Excel), `Projeler`, `Yedekler`, `IsAkisi`. Her tür için "çalışma klasörüne kaydet" kutusu vardır;
@@ -453,11 +453,18 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
   Açık belge değişmez, sonuç `*_duzlestirilmis.pdf` olarak kaydedilip yeni sekmede açılır; iş arka planda çalışır, durdurulabilir.
   Sansür kutuları önce gerçekten uygulanır (altındaki metin silinir), sonra gömülür.
 
+## Yeni (1.1.0 · L1): arayüz iyileştirmeleri
+* **Ayarlar** ve **Paylaş** düğmeleri üst çubukta (Dışa Aktar'ın yanında). Paylaş: Telefona gönder · Bulut klasörüne kaydet · Dosya konumunu aç. E-posta ile gönderme seçeneği kaldırıldı.
+* **Komut paleti (Ctrl+K):** ayarlar da aranır ("tema", "çalışma klasörü" → ilgili kategori açılır); boş aramada en son kullanılan 5 komut en üsttedir; her komutta menü yolu ve kısayol gri yazılır.
+* **Son açılanlar:** her girdinin yanında **×** (yalnız listeden gizler, dosya silinmez; uygulama yeniden açılınca geri gelir) + *Listeyi temizle*.
+* **Sekmeler:** uzun adlarda başı ve uzantı görünür, tam ad ipucunda; değişmiş belge kırmızı ●; sekme genişliği Ayarlar → Görünüm'de. *Düğmelerde yazı göster* seçeneği (Geri al/Yinele).
+* **Karşılama ekranı:** Aç · Tara · Telefondan al · Birleştir · Böl kartları.
+* Telefon aktarımı "boşta kaldı" bildirimi artık yalnızca bir kez çıkar; şekil (dikdörtgen/elips) kenarları yuvarlak uçlu ve PDF çıktısında aynı.
+
 ## Yeni: Paylaşım seçenekleri (yerel ağ dışında)
 * **Aynı ağda değil misiniz?** (QR penceresi): telefonun **mobil sıcak noktasına** bilgisayarı bağlayın (internet gerekmez), *Ağ adresi*
   listesinden yeni adresi seçip QR'ı yeniden okutun; **Wi‑Fi ayarlarını aç** düğmesi vardır. Aktarım yine doğrudan telefon ile bilgisayar arasındadır.
-* **Dosya → Paylaş:** **E-postayla gönder** (Outlook varsa dosya ekli yeni ileti; yoksa dosyanın klasörü açılır + boş e-posta, dosyayı sürükleyin),
-  **Bulut klasörüne kaydet** (bilgisayarınızda bulunan OneDrive / Google Drive / Dropbox klasörlerinden birine kopya; eşitlemeyi o uygulama yapar),
+* **Dosya → Paylaş:** **Bulut klasörüne kaydet** (bilgisayarınızda bulunan OneDrive / Google Drive / Dropbox klasörlerinden birine kopya; eşitlemeyi o uygulama yapar),
   **Dosya konumunu aç**. Kaydedilmemiş değişiklik varsa özgün dosya yerine işaretli kopya kullanılır.
 * **Deneysel — kendi internet tünelim:** QR penceresinde *Gelişmiş* kutusu. cloudflared/ngrok gibi **kendi kurduğunuz** tünelin adresini girin, tüneli gösterilen
   yerel bağlantı noktasına yönlendirin. Sunucu yalnız `127.0.0.1`'de dinler ve **6 haneli PIN** ister (telefon önce PIN sayfasını görür); **5 yanlış denemede kilitlenir**

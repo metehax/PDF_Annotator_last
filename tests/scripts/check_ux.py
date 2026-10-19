@@ -488,8 +488,8 @@ import collections
 use = collections.Counter(i.strip('"') for _, i, _ in rows)
 check("hiçbir ikon 3'ten fazla eylemde kullanılmıyor", max(use.values()) <= 3, str(use.most_common(4)))
 icon_of = {t: i.strip('"') for _, i, t in rows}
-distinct = [("E-postayla gönder…", "mail"), ("Bulut klasörüne kaydet…", "cloud"), ("Dosya konumunu aç", "folder_open"), ("Görselleri PDF'e çevir…", "image_pdf"),
-            ("Her sayfayı ayrı PDF yap…", "split"), ("Tercihler…", "settings"), ("Düzleştir ve kaydet…", "flatten"), ("Word'e dönüştür (.docx)…", "convert"),
+distinct = [("Bulut klasörüne kaydet…", "cloud"), ("Dosya konumunu aç", "folder_open"), ("Görselleri PDF'e çevir…", "image_pdf"),
+            ("Her sayfayı ayrı PDF yap…", "split"), ("Ayarlar…", "settings"), ("Düzleştir ve kaydet…", "flatten"), ("Word'e dönüştür (.docx)…", "convert"),
             ("Çıkış", "exit"), ("Gerçek boyut (%100)", "one_to_one")]
 check("önceki çakışan ikonlar ayrıştırıldı (benzersiz, anlamlı)", all(icon_of.get(t) == i for t, i in distinct), str([(t, icon_of.get(t)) for t, i in distinct if icon_of.get(t) != i]))
 unique_icons = [i for _, i in distinct]
@@ -500,7 +500,7 @@ alltexts = [a.text() for m in menus.values() for a in m.actions() if not a.isSep
 long_ = sorted({t for t in alltexts if len(t) > 40})
 check("menü etiketleri ≤ 40 karakter", not long_, str(long_))
 check("pencere/ek bilgi açan eylemler '…' ile bitiyor, anında çalışanlar bitmiyor (örnekler)",
-      all(t.endswith("…") for t in ("Fotoğraftan belge tara…", "Düzleştir ve kaydet…", "Tercihler…")) and not any(t.endswith("…") for t in ("Sayfayı sil", "Dosya konumunu aç", "Sayfayı kopyala")))
+      all(t.endswith("…") for t in ("Fotoğraftan belge tara…", "Düzleştir ve kaydet…", "Ayarlar…")) and not any(t.endswith("…") for t in ("Sayfayı sil", "Dosya konumunu aç", "Sayfayı kopyala")))
 check("Damga kütüphanesi İmza menüsünde (D3)", any(a.text() == "Damga kütüphanesi…" for a in menus["İmza"].actions()))
 
 # ---- tek ekran görüntüsü: sansür aracı + yumuşak etiketli kutu + özellik çubuğu + durum; yanında Belge menüsü

@@ -195,6 +195,10 @@ class DocToolsMixin:
         dlg.show()
         return dlg
 
+    def open_share_send(self):
+        """Paylaş → Telefona gönder (L3'te pencerenin "Gönder" sekmesi açılacak)."""
+        return self.open_share()
+
     # -- Belge tarama -----------------------------------------------------------
     def scan_images(self, paths=None):
         """Görsellerden (ya da PDF'lerden) tarama penceresi; yol verilmezse dosya seçtirir."""

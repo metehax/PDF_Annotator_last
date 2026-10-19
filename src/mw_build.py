@@ -201,7 +201,6 @@ class BuildMixin:
         A(m_exp, "images", "Tüm sayfaları PNG (klasöre)", lambda: self.export_all_pages_images("png"))
         m_share = m_file.addMenu(icon("share"), "Paylaş")
         self._doc_controls.append(m_share.menuAction())
-        A(m_share, "mail", "E-postayla gönder…", self.share_email)
         A(m_share, "cloud", "Bulut klasörüne kaydet…", self.share_cloud)
         A(m_share, "folder_open", "Dosya konumunu aç", self.share_reveal)
         m_file.addSeparator()
@@ -244,7 +243,7 @@ class BuildMixin:
         m_edit.addSeparator()
         A(m_edit, "search", "Bul…", self._focus_search, "Ctrl+F")
         A(m_edit, "sliders", "Komut paleti…", self.open_palette, "Ctrl+K", needs_doc=False)
-        A(m_edit, "settings", "Tercihler…", self.open_preferences, "Ctrl+,", needs_doc=False)
+        A(m_edit, "settings", "Ayarlar…", self.open_preferences, "Ctrl+,", needs_doc=False)
 
         m_view = QMenu("Görünüm", self)
         A(m_view, "zoom_in", "Yakınlaştır", lambda: self.view.animate_zoom(self.view.zoom() * 1.25), "Ctrl+=")
@@ -417,6 +416,35 @@ class BuildMixin:
         h.addWidget(self.btn_export)
         h.addSpacing(4)
 
+        self.btn_share = QToolButton()
+        self.btn_share.setObjectName("secondaryTb")
+        self.btn_share.setIcon(icon("share"))
+        self.btn_share.setIconSize(QSize(18, 18))
+        self.btn_share.setText("Paylaş")
+        self.btn_share.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_share.setPopupMode(QToolButton.ToolButtonPopupMode.InstantPopup)
+        self.btn_share.setCursor(Qt.CursorShape.PointingHandCursor)
+        share_menu = QMenu(self.btn_share)
+        share_menu.addAction(icon("phone"), "Telefona gönder…", self.open_share_send)
+        a_cloud = share_menu.addAction(icon("cloud"), "Bulut klasörüne kaydet…", self.share_cloud)
+        a_loc = share_menu.addAction(icon("folder_open"), "Dosya konumunu aç", self.share_reveal)
+        self._doc_controls += [a_cloud, a_loc]
+        self.btn_share.setMenu(share_menu)
+        h.addWidget(self.btn_share)
+        h.addSpacing(4)
+
+        self.btn_settings = QToolButton()
+        self.btn_settings.setObjectName("secondaryTb")
+        self.btn_settings.setIcon(icon("settings"))
+        self.btn_settings.setIconSize(QSize(18, 18))
+        self.btn_settings.setText("Ayarlar")
+        self.btn_settings.setToolButtonStyle(Qt.ToolButtonStyle.ToolButtonTextBesideIcon)
+        self.btn_settings.setToolTip("Ayarlar (Ctrl+,)")
+        self.btn_settings.setCursor(Qt.CursorShape.PointingHandCursor)
+        self.btn_settings.clicked.connect(lambda: self.open_preferences())
+        h.addWidget(self.btn_settings)
+        h.addSpacing(4)
+
         self.btn_save = QPushButton(icon("save", "on_accent"), "Kopya kaydet")
         self.btn_save.setObjectName("primary")
         self.btn_save.setIconSize(QSize(18, 18))
@@ -425,6 +453,7 @@ class BuildMixin:
         self.btn_save.clicked.connect(self.save_document)
         h.addWidget(self.btn_save)
         self._doc_controls += [self.btn_export, self.btn_save]
+        self.apply_view_prefs()
         return bar
 
     # -- sol: ikon şeridi + kayan panel ------------------------------------------

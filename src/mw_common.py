@@ -6,11 +6,14 @@ MainWindow ve mixin'lerin ortak sabitleri (araç listesi, kısayollar, dosya sü
 
 from __future__ import annotations
 
+import os
+
 from pdf_engine import IMAGE_EXTS
 
 
 CANVAS_TOP_INSET = 66      # araç kapsülü için çizim alanının üstünde bırakılan boşluk (px)
 RECENT_MAX = 8
+PALETTE_RECENT_MAX = 5
 _IMG_PATTERNS = " ".join("*" + e for e in IMAGE_EXTS)
 OPEN_FILTER = (f"PDF ve Resimler (*.pdf {_IMG_PATTERNS});;PDF (*.pdf);;"
                f"Resimler ({_IMG_PATTERNS})")
@@ -50,3 +53,13 @@ APP_ID = "PDFAnnotator.Belge"
 
 class _OpenCancelled(Exception):
     """Kullanıcı parola sorusunu iptal etti."""
+
+
+def short_tab_name(name: str, max_chars: int = 30) -> str:
+    """Uzun dosya adını ortadan değil, başı + sonu (uzantı dahil) görünecek biçimde kısaltır: 'uzun_belge…son.pdf'."""
+    if len(name) <= max_chars:
+        return name
+    stem, ext = os.path.splitext(name)
+    tail = stem[-4:] if len(stem) > 8 else ""
+    keep = max(4, max_chars - len(ext) - len(tail) - 1)
+    return stem[:keep].rstrip() + "…" + tail + ext

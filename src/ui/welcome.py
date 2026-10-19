@@ -11,15 +11,55 @@ import os
 from typing import List
 
 from PySide6.QtCore import QSize, Qt, Signal
+from typing import Callable
+
 from PySide6.QtWidgets import (
-    QFrame, QHBoxLayout, QLabel, QPushButton, QVBoxLayout, QWidget,
+    QFrame, QHBoxLayout, QLabel, QPushButton, QToolButton, QVBoxLayout, QWidget,
 )
 
 from ui import theme
 from ui.icons import icon, pixmap as icon_pixmap
 
 
+CARDS = (("open", "open", "Aç"), ("scan", "scan", "Tara"), ("phone", "phone", "Telefondan al"),
+         ("merge", "merge", "Birleştir"), ("split", "split", "Böl"))
+
+
+def _hide_button(tip: str = "Listeden gizle (dosya silinmez)") -> QToolButton:
+    b = QToolButton()
+    b.setObjectName("recentHide")
+    b.setText("×")
+    b.setToolTip(tip)
+    b.setCursor(Qt.CursorShape.PointingHandCursor)
+    b.setFixedSize(24, 24)
+    return b
+
+
+class RecentMenuRow(QWidget):
+    """Dosya → Son açılanlar menüsündeki satır: ad + × (yalnız görünümden gizler)."""
+
+    def __init__(self, path: str, on_open: Callable[[], None], on_hide: Callable[[], None]):
+        super().__init__()
+        self.path = path
+        h = QHBoxLayout(self)
+        h.setContentsMargins(6, 1, 6, 1)
+        h.setSpacing(4)
+        self.btn = QPushButton(icon("file" if path.lower().endswith(".pdf") else "image"), os.path.basename(path))
+        self.btn.setObjectName("recentMenuItem")
+        self.btn.setFlat(True)
+        self.btn.setToolTip(path)
+        self.btn.setStyleSheet("text-align:left; padding:4px 8px; border:none;")
+        self.btn.clicked.connect(on_open)
+        self.hide_btn = _hide_button()
+        self.hide_btn.clicked.connect(on_hide)
+        h.addWidget(self.btn, 1)
+        h.addWidget(self.hide_btn)
+        self.setMinimumWidth(280)
+
+
 class _RecentRow(QPushButton):
+    hideRequested = Signal(str)
+
     def __init__(self, path: str, parent=None):
         super().__init__(parent)
         self.setObjectName("recentItem")
@@ -46,12 +86,17 @@ class _RecentRow(QPushButton):
             lbl.setAttribute(Qt.WidgetAttribute.WA_TransparentForMouseEvents)
             texts.addWidget(lbl)
         h.addLayout(texts, 1)
+        self.hide_btn = _hide_button()
+        self.hide_btn.clicked.connect(lambda: self.hideRequested.emit(path))
+        h.addWidget(self.hide_btn)
         self.setMinimumHeight(52)
 
 
 class WelcomeScreen(QWidget):
     openRequested = Signal()
     recentRequested = Signal(str)
+    recentHidden = Signal(str)
+    cardRequested = Signal(str)          # "open" | "scan" | "phone" | "merge" | "split"
 
     def __init__(self, parent=None):
         super().__init__(parent)
@@ -110,6 +155,20 @@ class WelcomeScreen(QWidget):
         dv.addWidget(shortcut)
         v.addWidget(self.drop)
 
+        cards = QHBoxLayout()
+        cards.setSpacing(8)
+        self.cards = {}
+        for key, ico_name, label in CARDS:
+            b = QPushButton(icon(ico_name), label)
+            b.setObjectName("welcomeCard")
+            b.setIconSize(QSize(24, 24))
+            b.setCursor(Qt.CursorShape.PointingHandCursor)
+            b.setMinimumHeight(64)
+            b.clicked.connect(lambda _=False, k=key: self.cardRequested.emit(k))
+            cards.addWidget(b, 1)
+            self.cards[key] = b
+        v.addLayout(cards)
+
         self.recent_title = QLabel("SON AÇILANLAR")
         self.recent_title.setObjectName("sectionTitle")
         v.addWidget(self.recent_title)
@@ -140,5 +199,6 @@ class WelcomeScreen(QWidget):
         for p in self._recent:
             row = _RecentRow(p)
             row.clicked.connect(lambda _=False, path=p: self.recentRequested.emit(path))
+            row.hideRequested.connect(self.recentHidden.emit)
             self.recent_box.addWidget(row)
         self.recent_title.setVisible(bool(self._recent))

@@ -1,7 +1,7 @@
 """
 mw_share.py
 ===========
-Dosya → Paylaş: e-postayla gönder, bulut klasörüne kaydet (OneDrive / Google Drive / Dropbox yerel klasörü),
+Dosya → Paylaş: bulut klasörüne kaydet (OneDrive / Google Drive / Dropbox yerel klasörü),
 dosya konumunu aç. Çekirdek `sharing.py`'dadır; uygulama hiçbir üçüncü taraf servisle kendisi konuşmaz.
 
 MainWindow bu mixin'i miras alır; yöntemler `self` üzerinden ana pencerenin durumuna erişir.
@@ -43,25 +43,6 @@ class ShareMixin:
             return s.path
         out = os.path.join(tempfile.gettempdir(), SHARE_TMP, self._stem(s) + "_isaretli.pdf")
         return self._export_copy(s, out)
-
-    # -- e-posta ----------------------------------------------------------------------
-    def share_email(self) -> Optional[str]:
-        """Outlook varsa dosya ekli yeni ileti; yoksa dosyanın klasörü + boş e-posta (dosyayı sürükleyin). Modu döndürür."""
-        s = self.active_session
-        if not s:
-            self.toasts.show("Önce bir belge açın.", "info")
-            return None
-        try:
-            path = self._share_file(s)
-            mode = sharing.compose_email(path, subject=os.path.basename(path))
-        except Exception as ex:
-            QMessageBox.critical(self, "Hata", f"E-posta hazırlanamadı:\n{ex}")
-            return None
-        if mode == "outlook":
-            self.toasts.show("Outlook'ta ek olarak açıldı.", "success")
-        else:
-            self.toasts.show("Dosyanın klasörü açıldı; dosyayı e-posta iletisine sürükleyip bırakın.", "info", timeout_ms=7000)
-        return mode
 
     # -- bulut klasörü ----------------------------------------------------------------
     def share_cloud(self, choose: Optional[Callable[[List[sharing.CloudFolder]], Optional[sharing.CloudFolder]]] = None

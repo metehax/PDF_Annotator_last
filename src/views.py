@@ -816,7 +816,7 @@ class PDFView(QGraphicsView):
             fc = QColor(self.state.fill_color)
             fc.setAlphaF(self.state.fill_opacity)
             item.setBrush(QBrush(fc))
-            item.setPen(QPen(self.state.stroke_color, self.state.pen_width))
+            item.setPen(self._make_pen(self.state.stroke_color, self.state.pen_width, 1.0))
             self._add_temp(item)
 
         elif tool == "redact":

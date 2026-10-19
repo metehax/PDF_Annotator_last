@@ -18,6 +18,7 @@ from typing import Dict, List, Optional, Tuple
 
 from PySide6.QtCore import QEvent, QObject, QPointF, QSettings, Qt, QThreadPool, QTimer, QUrl, Signal
 from PySide6.QtGui import QColor, QDesktopServices, QKeySequence, QUndoGroup
+from PySide6.QtWidgets import QWidgetAction
 from PySide6.QtWidgets import (
     QApplication, QColorDialog, QFileDialog, QHBoxLayout, QInputDialog, QLabel, QLineEdit,
     QMainWindow, QMenu, QMessageBox, QSizePolicy, QStackedWidget, QVBoxLayout, QWidget,
@@ -33,14 +34,15 @@ import docsec
 import crashguard
 import workspace
 from ui.palette import Command, CommandPalette
+from ui.preferences import SEARCH_ENTRIES, TAB_CHARS
 from ui.signatures import SignatureLibrary
 from ui.stamps import StampLibrary
 from ui.toast import ToastManager
-from ui.welcome import WelcomeScreen
+from ui.welcome import RecentMenuRow, WelcomeScreen
 from ui.ocrdialog import _OcrTask
 
 from mw_common import (
-    APP_ID, CANVAS_TOP_INSET, OPEN_FILTER, RECENT_MAX, TOOLS, TOOL_KEYS, _OpenCancelled,
+    APP_ID, CANVAS_TOP_INSET, OPEN_FILTER, PALETTE_RECENT_MAX, RECENT_MAX, TOOLS, TOOL_KEYS, _OpenCancelled, short_tab_name,
 )
 from mw_annot import AnnotMixin
 from mw_build import BuildMixin
@@ -83,6 +85,7 @@ class MainWindow(
         self.night_mode = False
         self.settings = QSettings("PDFAnnotator", "PDFAnnotator")
         workspace.configure(self.settings)
+        self.settings.setValue("recent_hidden", [])           # × ile gizlenenler yeniden açılışta tekrar görünür
         RedactionAnnotation.final_view = str(self.settings.value("redactFinal", "false")).lower() == "true"
         saved_theme = self.settings.value("theme", "")
         self.dark_mode = (saved_theme == "dark") if saved_theme in ("dark", "light") \
@@ -146,6 +149,8 @@ class MainWindow(
         self.welcome = WelcomeScreen()
         self.welcome.openRequested.connect(self.open_pdf)
         self.welcome.recentRequested.connect(lambda p: self.open_paths([p]))
+        self.welcome.recentHidden.connect(self.hide_recent)
+        self.welcome.cardRequested.connect(self._welcome_card)
         self.center_stack.addWidget(self.welcome)
         self.center_stack.addWidget(self._build_canvas_stack())
         ws.addWidget(self.center_stack)
@@ -168,6 +173,7 @@ class MainWindow(
 
         self.toasts = ToastManager(self.workspace)
         self.palette = CommandPalette(central, self._palette_commands)
+        self.palette.commandRun.connect(self._palette_ran)
 
         self._build_shortcuts()
         self._refresh_recent()
@@ -456,7 +462,7 @@ class MainWindow(
                 if sub is not None:
                     if sub is self.recent_menu:
                         continue
-                    walk(sub, a.text())
+                    walk(sub, f"{prefix} › {a.text()}")
                     continue
                 if not a.isEnabled() or not a.text():
                     continue
@@ -469,11 +475,27 @@ class MainWindow(
 
         for title, menu in self._menus:
             walk(menu, title)
-        for p in self._recent_paths()[:RECENT_MAX]:
+        for p in self._recent_paths(visible=True)[:RECENT_MAX]:
             if os.path.exists(p):
                 cmds.append(Command(f"Aç: {os.path.basename(p)}", lambda p=p: self.open_paths([p]),
                                     "Son açılanlar", "file" if p.lower().endswith(".pdf") else "image"))
+        for title, cat in SEARCH_ENTRIES:
+            cmds.append(Command(f"Ayar: {title}", lambda c=cat: self.open_preferences(c), f"Ayarlar › {cat}", "settings"))
+        if not q:                                       # boş aramada son kullanılanlar en üstte
+            by_title = {c.title: c for c in cmds}
+            top = [by_title[t] for t in self._palette_recent() if t in by_title]
+            cmds = top + [c for c in cmds if c not in top]
         return cmds
+
+    def _palette_recent(self):
+        v = self.settings.value("palette/recent", [])
+        if isinstance(v, str):
+            v = [v]
+        return [t for t in (v or []) if isinstance(t, str)][:PALETTE_RECENT_MAX]
+
+    def _palette_ran(self, title):
+        items = [t for t in self._palette_recent() if t != title]
+        self.settings.setValue("palette/recent", [title] + items[:PALETTE_RECENT_MAX - 1])
 
     # -- Windows "Birlikte aç" kaydı ---------------------------------------------
     @staticmethod
@@ -577,8 +599,36 @@ class MainWindow(
         self.refresh_doc_tabs()
         self.switch_session(last_idx)
 
-    def _recent_paths(self):
+    def _welcome_card(self, key):
+        """Karşılama ekranındaki hızlı kartlar."""
+        if key == "open":
+            self.open_pdf()
+        elif key == "scan":
+            self.scan_images()
+        elif key == "phone":
+            self.open_share()
+        elif key == "merge":
+            self.merge_pdfs()
+        elif key == "split":
+            if not self.active_session:
+                self.toasts.show("Bölmek istediğiniz PDF'i seçin.", "info")
+                self.open_pdf()
+            if self.active_session:
+                self.split_all_pages()
+
+    def _recent_paths(self, visible=False):
+        """Son açılanlar (en yeni önce). `visible=True`: × ile gizlenenler çıkarılır (dosya `recent` listesinde kalır)."""
         v = self.settings.value("recent", [])
+        if isinstance(v, str):
+            v = [v]
+        paths = [p for p in (v or []) if isinstance(p, str)]
+        if visible:
+            hidden = {os.path.normcase(p) for p in self._hidden_recent()}
+            paths = [p for p in paths if os.path.normcase(p) not in hidden]
+        return paths
+
+    def _hidden_recent(self):
+        v = self.settings.value("recent_hidden", [])
         if isinstance(v, str):
             v = [v]
         return [p for p in (v or []) if isinstance(p, str)]
@@ -587,18 +637,36 @@ class MainWindow(
         path = os.path.abspath(path)
         items = [p for p in self._recent_paths() if os.path.normcase(p) != os.path.normcase(path)]
         self.settings.setValue("recent", [path] + items[:RECENT_MAX - 1])
+        self.settings.setValue("recent_hidden", [p for p in self._hidden_recent()
+                                                 if os.path.normcase(p) != os.path.normcase(path)])
+        self._refresh_recent()
+
+    def hide_recent(self, path):
+        """Girdiyi yalnız görünümden gizler (dosya silinmez, `recent` listesinde kalır); uygulama yeniden açılınca geri gelir."""
+        if os.path.normcase(path) not in {os.path.normcase(p) for p in self._hidden_recent()}:
+            self.settings.setValue("recent_hidden", self._hidden_recent() + [path])
+        self._refresh_recent()
+
+    def clear_recent(self):
+        self.settings.setValue("recent", [])
+        self.settings.setValue("recent_hidden", [])
         self._refresh_recent()
 
     def _refresh_recent(self):
-        paths = [p for p in self._recent_paths() if os.path.exists(p)]
+        paths = [p for p in self._recent_paths(visible=True) if os.path.exists(p)]
         self.welcome.set_recent(paths)
         self.recent_menu.clear()
         for p in paths:
-            self.recent_menu.addAction(icon("file" if p.lower().endswith(".pdf") else "image"),
-                                       os.path.basename(p), lambda path=p: self.open_paths([path]))
+            wa = QWidgetAction(self.recent_menu)
+            wa.setDefaultWidget(RecentMenuRow(p, lambda _=False, path=p: (self.recent_menu.close(), self.open_paths([path])),
+                                              lambda _=False, path=p: self.hide_recent(path)))
+            self.recent_menu.addAction(wa)
         if not paths:
             a = self.recent_menu.addAction("(henüz yok)")
             a.setEnabled(False)
+        else:
+            self.recent_menu.addSeparator()
+            self.recent_menu.addAction("Listeyi temizle", self.clear_recent)
 
     @staticmethod
     def _dropped_paths(mime):
@@ -772,15 +840,27 @@ class MainWindow(
             workspace.remember(paths[0])
             self.open_paths(paths)
 
+    def apply_view_prefs(self):
+        """Ayarlar → Görünüm: düğme yazıları ve sekme genişliği."""
+        labels = str(self.settings.value("ui/button_labels", "false")).lower() == "true"
+        for btn, text in ((self.btn_undo, "Geri al"), (self.btn_redo, "Yinele")):
+            btn.setText(text if labels else "")
+        if hasattr(self, "sessions"):
+            self.refresh_doc_tabs()
+
     def refresh_doc_tabs(self):
         self.doc_tabbar.blockSignals(True)
         while self.doc_tabbar.count():
             self.doc_tabbar.removeTab(0)
         for s in self.sessions:
-            i = self.doc_tabbar.addTab(("● " if self._is_dirty(s) else "") + s.title)
+            chars = TAB_CHARS.get(str(self.settings.value("ui/tab_width", "normal") or "normal"), TAB_CHARS["normal"])
+            dirty = self._is_dirty(s)
+            i = self.doc_tabbar.addTab(("● " if dirty else "") + short_tab_name(s.title, chars))
+            if dirty:
+                self.doc_tabbar.setTabTextColor(i, ui_theme.qcolor("danger"))
             sec = getattr(s, "security", None)
             self.doc_tabbar.setTabToolTip(
-                i, s.path + ("\nKaydedilmemiş değişiklikler var" if self._is_dirty(s) else "")
+                i, s.title + "\n" + s.path + ("\nKaydedilmemiş değişiklikler var" if dirty else "")
                 + (f"\nParola koruması: {sec.describe()}" if sec is not None and sec.active else ""))
         if self.active_session is not None:
             mark = "● " if self._is_dirty(self.active_session) else ""

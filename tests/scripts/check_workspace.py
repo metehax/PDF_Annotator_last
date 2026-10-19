@@ -196,8 +196,8 @@ def pump(ms=150, until=None, limit=8000):
 
 
 acts = {a.text(): a for a in w.findChildren(QAction)}
-check("menü: Tercihler… (Ctrl+,)", "Tercihler…" in acts and acts["Tercihler…"].shortcut() == QKeySequence("Ctrl+,"),
-      str(acts.get("Tercihler…") and acts["Tercihler…"].shortcut().toString()))
+check("menü: Ayarlar… (Ctrl+,)", "Ayarlar…" in acts and acts["Ayarlar…"].shortcut() == QKeySequence("Ctrl+,"),
+      str(acts.get("Ayarlar…") and acts["Ayarlar…"].shortcut().toString()))
 
 # --- tercihler penceresi
 WS2 = os.path.join(tmp, "calisma2")

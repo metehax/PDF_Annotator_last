@@ -13,7 +13,7 @@ from __future__ import annotations
 from dataclasses import dataclass
 from typing import Callable, List, Optional
 
-from PySide6.QtCore import QEvent, QSize, Qt
+from PySide6.QtCore import QEvent, QSize, Qt, Signal
 from PySide6.QtGui import QIcon
 from PySide6.QtWidgets import (
     QFrame, QGraphicsDropShadowEffect, QHBoxLayout, QLabel, QLineEdit, QListWidget,
@@ -66,6 +66,7 @@ class CommandPalette(QFrame):
     """Ana pencerenin üstünde ortada beliren arama kutusu + sonuç listesi."""
 
     WIDTH = 580
+    commandRun = Signal(str)           # çalıştırılan komutun başlığı ("son kullanılanlar" için)
 
     def __init__(self, host: QWidget, provider: Callable[[str], List[Command]]):
         super().__init__(host)
@@ -170,6 +171,7 @@ class CommandPalette(QFrame):
         h.addWidget(title, 1)
         if c.category:
             cat = QLabel(c.category)
+            cat.setToolTip(c.category)
             cat.setObjectName("paletteCat")
             h.addWidget(cat)
         if c.shortcut:
@@ -185,6 +187,7 @@ class CommandPalette(QFrame):
         if 0 <= row < len(self._commands):
             cmd = self._commands[row]
             self.close_palette()
+            self.commandRun.emit(cmd.title)
             cmd.run()
 
     # -- klavye -------------------------------------------------------------

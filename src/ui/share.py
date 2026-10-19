@@ -372,8 +372,10 @@ class ShareDialog(QDialog):
         if self._tunnel_on:
             self.refresh_pin_state()
         if self._server and self._server.idle_seconds() > IDLE_LIMIT_S:
-            self._main.toasts.show("Telefon aktarımı boşta kaldığı için durduruldu.", "info")
-            self.close()
+            self.stop()                       # önce zamanlayıcı + sunucu durur: bildirim bir kez çıkar
+            if self.isVisible():              # pencere zaten kapalıysa (×/Esc) bildirim gösterilmez
+                self._main.toasts.show("Telefon aktarımı boşta kaldığı için durduruldu.", "info")
+                self.close()
 
     def stop(self):
         self._idle.stop()
@@ -387,6 +389,10 @@ class ShareDialog(QDialog):
     def closeEvent(self, e):
         self.stop()
         super().closeEvent(e)
+
+    def done(self, r):                        # Esc/reject/accept closeEvent çağırmaz: sunucu ve zamanlayıcı burada durur
+        self.stop()
+        super().done(r)
 
     # -- telefondan gelen ----------------------------------------------------
     def _on_received(self, path: str):

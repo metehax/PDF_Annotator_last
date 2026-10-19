@@ -149,7 +149,7 @@ Tamamlananlar: B, C1, C2, D1, D2, E, F, G1–G3, H1, H2, J1–J3, testler. Eski 
 Kaynak: kullanıcı geri bildirimi. **Sıra L1 → L2 → L3 → L4**, her biri ayrı sohbet/commit. Sürüm numarası `appinfo.VERSION`'u **yalnızca L4 sonunda** `1.1.0` yap, `build.bat` + `tools/make_release.py` + GitHub Release (`docs/YAYIN.md`).
 Ortak ilkeler: yeni ayar = `QSettings` anahtarı + Tercihler'de görünür; yeni eylem komut paletine otomatik girer (`A(...)`); yeni ikon `ui/icons._PATHS`; kod `src/` altında; testler `tests/scripts/check_<ad>.py` (+ `check_ux.py` menü beklentileri bilerek güncellenir).
 
-## L1 — Arayüz: Ayarlar, komut paleti, sekmeler, Paylaş, e-postayı kaldırma
+## L1 — Arayüz: Ayarlar, komut paleti, sekmeler, Paylaş, e-postayı kaldırma (TAMAM)
 **Yapılacak**
 - **Ayarlar düğmesi:** üst çubukta görünür ⚙ **Ayarlar** (Dışa aktar'ın yanında). `PreferencesDialog` soldan kategori listesi (Genel · Görünüm · Çalışma klasörü · Tarama · Telefon aktarımı · Güncelleme · Kısayollar) olsun; mevcut bölümleri kategorilere dağıt, davranışı değiştirme.
 - **Komut paleti (`ui/palette.py`):** ayarlar da aranabilir ("tema", "çalışma klasörü" → ilgili kategori açılır); en üstte **son kullanılan** komutlar (ayar `palette/recent`, ≤5); her komutta kısayol ve menü yolu gri yazı.

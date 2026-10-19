@@ -28,13 +28,15 @@ from ui.preferences import PreferencesDialog
 
 class WorkspaceMixin:
     # -- Tercihler ---------------------------------------------------------------
-    def open_preferences(self):
+    def open_preferences(self, category: Optional[str] = None):
         dlg = getattr(self, "_prefs_dialog", None)
         if dlg is None or not dlg.isVisible():
             dlg = self._prefs_dialog = PreferencesDialog(self)
             dlg.show()
         else:
             dlg.reload()
+        if category:
+            dlg.show_category(category)
         dlg.raise_()
         dlg.activateWindow()
         return dlg

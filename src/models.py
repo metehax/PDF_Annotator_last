@@ -400,7 +400,10 @@ class ShapeAnnotation(Annotation):
         else:
             item.setBrush(QBrush(Qt.BrushStyle.NoBrush))
         if self.outline is not None and self.width > 0:
-            item.setPen(QPen(self.outline, self.width))
+            pen = QPen(self.outline, self.width)
+            pen.setCapStyle(Qt.PenCapStyle.RoundCap)           # köşe/uçlar yuvarlak: çıktıdaki lineCap/lineJoin=1 ile aynı
+            pen.setJoinStyle(Qt.PenJoinStyle.RoundJoin)
+            item.setPen(pen)
         else:
             item.setPen(QPen(Qt.PenStyle.NoPen))
         return item
@@ -410,7 +413,7 @@ class ShapeAnnotation(Annotation):
         fill = qcolor_to_fitz(self.fill)
         outline = qcolor_to_fitz(self.outline)
         common = dict(color=outline, fill=fill, width=self.width if outline else 0,
-                      fill_opacity=self.fill_opacity, stroke_opacity=1)
+                      fill_opacity=self.fill_opacity, stroke_opacity=1, lineCap=1, lineJoin=1)
         (page.draw_oval if self.kind == "oval" else page.draw_rect)(r, **common)
 
     def translate(self, dx, dy) -> None:

@@ -139,7 +139,6 @@ def stylesheet(t: Dict[str, str]) -> str:
     chevron = _asset("chevron_down", t["text_muted"])
     chevron_up = _asset("chevron_up", t["text_muted"])
     check = _asset("check", "#ffffff", 3.0)
-    close = _asset("close", t["text_faint"])
     close_hover = _asset("close", t["text"])
     return f"""
 /* ---- temel ---------------------------------------------------------- */
@@ -178,7 +177,7 @@ QPushButton:pressed, QToolButton:pressed {{ background:{t['pressed']}; }}
 QPushButton:disabled, QToolButton:disabled {{ color:{t['text_faint']}; }}
 QPushButton:checked, QToolButton:checked {{ background:{t['accent_soft']}; color:{t['accent_text']}; }}
 QToolButton::menu-indicator {{ image:none; width:0; }}
-QPushButton#iconbtn, QToolButton#iconbtn {{ padding:6px; min-width:20px; }}
+QPushButton#iconbtn, QToolButton#iconbtn {{ padding:8px; min-width:22px; min-height:22px; }}
 QPushButton#secondary {{ background:{t['surface2']}; border:1px solid {t['border_strong']}; }}
 QPushButton#secondary:hover {{ background:{t['hover']}; }}
 QPushButton#primary, QToolButton#primary {{ background:{t['accent']}; color:#ffffff;
@@ -262,13 +261,13 @@ QTabBar::tab:hover {{ background:{t['hover']}; color:{t['text']}; }}
 QTabBar::tab:selected {{ background:{t['surface2']}; color:{t['text']}; font-weight:600; }}
 QTabBar#doctabs {{ background:transparent; }}
 QTabBar#doctabs::tab {{ background:transparent; color:{t['text_muted']}; padding:6px 8px 6px 12px;
-    margin:0 2px; border:1px solid transparent; border-radius:8px; min-width:80px; max-width:220px; }}
+    margin:0 2px; border:1px solid transparent; border-radius:8px; min-width:80px; }}
 QTabBar#doctabs::tab:hover {{ background:{t['hover']}; color:{t['text']}; }}
 QTabBar#doctabs::tab:selected {{ background:{t['surface2']}; color:{t['text']}; border-color:{t['border']};
     font-weight:600; }}
-QTabBar::close-button {{ image:url("{close}"); subcontrol-position:right; margin-left:6px;
-    width:14px; height:14px; border-radius:4px; }}
-QTabBar::close-button:hover {{ image:url("{close_hover}"); background:{t['hover']}; }}
+QTabBar::close-button {{ image:url("{close_hover}"); subcontrol-position:right; margin-left:6px;
+    width:16px; height:16px; border-radius:4px; }}
+QTabBar::close-button:hover {{ image:url("{close_hover}"); background:{t['border_strong']}; }}
 
 /* ---- kenar panelleri ------------------------------------------------- */
 QDockWidget {{ color:{t['text_muted']}; font-size:11px; font-weight:600; }}
@@ -305,10 +304,10 @@ QMenu::separator {{ height:1px; background:{t['border']}; margin:5px 6px; }}
 
 /* ---- yeni yerleşim ------------------------------------------------------ */
 #topbar {{ background:{t['surface']}; border-bottom:1px solid {t['border']}; }}
-QToolButton#menuBtn {{ color:{t['text_muted']}; padding:6px 9px; border-radius:7px; }}
+QToolButton#menuBtn {{ color:{t['text']}; padding:8px 11px; border-radius:7px; }}
 QToolButton#menuBtn:hover, QToolButton#menuBtn:pressed {{ color:{t['text']}; background:{t['hover']}; }}
 QToolButton#secondaryTb {{ background:{t['surface2']}; border:1px solid {t['border_strong']};
-    padding:6px 12px; }}
+    padding:8px 12px; min-height:20px; }}
 QToolButton#secondaryTb:hover {{ background:{t['hover']}; }}
 QToolButton#secondaryTb:disabled {{ border-color:{t['border']}; }}
 #statusbar {{ background:{t['surface']}; border-top:1px solid {t['border']}; }}
@@ -351,6 +350,14 @@ QPushButton#segBtn:checked {{ background:{t['accent_soft']}; border-color:{t['ac
 QPushButton#recentItem {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;
     padding:0; text-align:left; }}
 QPushButton#recentItem:hover {{ background:{t['hover']}; border-color:{t['accent']}; }}
+QPushButton#welcomeCard {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:10px;
+    padding:10px 6px; color:{t['text']}; font-weight:600; }}
+QPushButton#welcomeCard:hover {{ background:{t['hover']}; border-color:{t['accent']}; }}
+QToolButton#recentHide {{ color:{t['text_muted']}; border:none; border-radius:12px; font-size:16px; background:transparent; }}
+QToolButton#recentHide:hover {{ color:{t['text']}; background:{t['border_strong']}; }}
+QListWidget#prefNav {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:8px; padding:4px; }}
+QListWidget#prefNav::item {{ padding:8px 10px; border-radius:6px; }}
+QListWidget#prefNav::item:selected {{ background:{t['accent_soft']}; color:{t['text']}; }}
 #recentName {{ color:{t['text']}; font-weight:600; }}
 #recentFolder {{ color:{t['text_faint']}; font-size:11px; }}
 #dropOverlay {{ background:{t['accent_soft']}; border:3px dashed {t['accent']}; border-radius:18px;

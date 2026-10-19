@@ -5,12 +5,10 @@ Paylaşım yardımcıları (arayüzsüz çekirdek; uygulama hiçbir üçüncü t
 
 * `cloud_folders()` — bilgisayarda yerel olarak senkronlanan OneDrive / Google Drive / Dropbox klasörlerini bulur
   (senkronu o uygulamanın kendisi yapar; biz yalnızca dosyayı o klasöre kopyalarız).
-* `compose_email()` — Outlook varsa dosya ekli yeni ileti açar (`outlook.exe /a`), yoksa dosyanın klasörünü gösterir
-  ve boş bir `mailto:` iletisi açar (ek, mailto ile verilemez; kullanıcı dosyayı sürükler).
 * `reveal()` — dosyanın konumunu Gezgin'de açar.
 
-Dış etkileşimler (süreç başlatma, URL/klasör açma, ortam, kayıt defteri) parametre olarak verilebilir: testler gerçek
-Outlook/posta istemcisi/Gezgin açmadan sahte çağrılarla sınanır. Varsayılanlar `subprocess` ve `QDesktopServices`'tir.
+Dış etkileşimler (süreç başlatma, klasör açma, ortam) parametre olarak verilebilir: testler gerçek
+Gezgin açmadan sahte çağrılarla sınanır. Varsayılanlar `subprocess` ve `QDesktopServices`'tir.
 """
 from __future__ import annotations
 
@@ -20,7 +18,6 @@ import subprocess
 import sys
 from dataclasses import dataclass
 from typing import Callable, Dict, List, Optional, Sequence
-from urllib.parse import quote
 
 
 @dataclass(frozen=True)
@@ -94,12 +91,6 @@ def cloud_folders(env: Optional[Dict[str, str]] = None, home: Optional[str] = No
 # ---------------------------------------------------------------------------
 # varsayılan dış eylemler (Qt / subprocess); testlerde sahtesi verilir
 # ---------------------------------------------------------------------------
-def _qt_open_url(url: str) -> bool:
-    from PySide6.QtCore import QUrl
-    from PySide6.QtGui import QDesktopServices
-    return QDesktopServices.openUrl(QUrl(url))
-
-
 def _qt_open_folder(path: str) -> bool:
     from PySide6.QtCore import QUrl
     from PySide6.QtGui import QDesktopServices
@@ -108,55 +99,6 @@ def _qt_open_folder(path: str) -> bool:
 
 def _popen(cmd: List[str]):
     return subprocess.Popen(cmd)
-
-
-def find_outlook(reg_lookup: Optional[Callable[[], Optional[str]]] = None) -> Optional[str]:
-    """Kurulu Outlook (klasik) yürütülebilir dosyasının yolu; yoksa None. Windows kayıt defteri "App Paths" kullanılır."""
-    if reg_lookup is not None:
-        p = reg_lookup()
-        return p if p and os.path.isfile(p) else None
-    if sys.platform != "win32":
-        return None
-    try:
-        import winreg
-    except ImportError:
-        return None
-    for hive in (winreg.HKEY_LOCAL_MACHINE, winreg.HKEY_CURRENT_USER):
-        try:
-            with winreg.OpenKey(hive, r"SOFTWARE\Microsoft\Windows\CurrentVersion\App Paths\OUTLOOK.EXE") as k:
-                p = winreg.QueryValueEx(k, "")[0]
-                if p and os.path.isfile(p):
-                    return p
-        except OSError:
-            continue
-    return None
-
-
-def mailto_url(subject: str = "", body: str = "") -> str:
-    q = []
-    if subject:
-        q.append("subject=" + quote(subject))
-    if body:
-        q.append("body=" + quote(body))
-    return "mailto:" + ("?" + "&".join(q) if q else "")
-
-
-def compose_email(path: str, subject: str = "", body: str = "", *, outlook: Optional[str] = None,
-                  launch: Optional[Callable[[List[str]], object]] = None,
-                  open_url: Optional[Callable[[str], object]] = None,
-                  open_folder: Optional[Callable[[str], object]] = None) -> str:
-    """Dosyayı e-postayla göndermeye hazırlar; "outlook" ya da "mailto" döndürür.
-    Outlook (`outlook` yolu verilmişse ya da `find_outlook()` bulursa): dosya ekli yeni ileti.
-    Yoksa: dosyanın klasörü açılır (dosyayı iletiye sürüklemek için) + boş `mailto:` iletisi."""
-    if not os.path.isfile(path):
-        raise FileNotFoundError(path)
-    exe = outlook if outlook is not None else find_outlook()
-    if exe:
-        (launch or _popen)([exe, "/a", os.path.abspath(path)])
-        return "outlook"
-    (open_folder or _qt_open_folder)(os.path.dirname(os.path.abspath(path)))
-    (open_url or _qt_open_url)(mailto_url(subject, body or "Ekteki dosyayı bu iletiye ekleyin: " + os.path.basename(path)))
-    return "mailto"
 
 
 def reveal(path: str, *, launch: Optional[Callable[[List[str]], object]] = None,

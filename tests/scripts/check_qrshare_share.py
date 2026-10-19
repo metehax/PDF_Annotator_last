@@ -59,32 +59,8 @@ check("bozuk info.json uygulamayı düşürmez", sharing.cloud_folders(env={"LOC
 dd = sharing.cloud_folders(env={"OneDrive": env["OneDrive"]}, home=home, drives=[])
 check("aynı klasör iki yoldan bulunsa da tek kez", [f.path for f in dd].count(os.path.abspath(env["OneDrive"])) == 1)
 
-# ---------------- e-posta ----------------
 f1 = os.path.join(tmp, "Sözleşme taslağı.pdf")
 open(f1, "wb").write(b"%PDF-1.4 x")
-calls = {"launch": [], "url": [], "folder": []}
-fake = dict(launch=lambda c: calls["launch"].append(list(c)), open_url=lambda u: calls["url"].append(u), open_folder=lambda p: calls["folder"].append(p))
-exe = os.path.join(tmp, "OUTLOOK.EXE")
-open(exe, "w").write("x")
-mode = sharing.compose_email(f1, "Konu", outlook=exe, **fake)
-check("Outlook varsa: ekli yeni ileti komutu (/a), mailto/klasör açılmaz", mode == "outlook" and calls["launch"] == [[exe, "/a", os.path.abspath(f1)]]
-      and calls["url"] == [] and calls["folder"] == [], str(calls))
-calls["launch"].clear()
-mode = sharing.compose_email(f1, "Sözleşme taslağı.pdf", outlook="", **fake)
-check("Outlook yoksa: dosyanın klasörü + mailto açılır, süreç başlatılmaz", mode == "mailto" and calls["launch"] == []
-      and calls["folder"] == [os.path.dirname(os.path.abspath(f1))] and len(calls["url"]) == 1 and calls["url"][0].startswith("mailto:?subject="), str(calls))
-check("mailto: Türkçe harf/boşluk kodlanır, gövdede dosya adı", "S%C3%B6zle%C5%9Fme%20tasla%C4%9F%C4%B1.pdf" in calls["url"][0] and "body=" in calls["url"][0]
-      and " " not in calls["url"][0], calls["url"][0])
-try:
-    sharing.compose_email(os.path.join(tmp, "yok.pdf"), "x", outlook="", **fake)
-    bad = False
-except FileNotFoundError:
-    bad = True
-check("olmayan dosya: FileNotFoundError, hiçbir şey açılmaz", bad and len(calls["url"]) == 1)
-check("find_outlook: kayıt defteri sonucu var olan dosyaysa döner", sharing.find_outlook(reg_lookup=lambda: exe) == exe)
-check("find_outlook: yol yok/dosya yok -> None", sharing.find_outlook(reg_lookup=lambda: None) is None
-      and sharing.find_outlook(reg_lookup=lambda: os.path.join(tmp, "olmayan.exe")) is None)
-check("mailto_url: boş ve dolu", sharing.mailto_url() == "mailto:" and sharing.mailto_url("a b", "ç").startswith("mailto:?subject=a%20b&body="))
 
 # ---------------- konumu aç ----------------
 calls = {"launch": [], "folder": []}
@@ -132,11 +108,11 @@ def pump(ms=150):
 toasts = []
 w.toasts.show = lambda *a, **k: toasts.append(a[0])
 acts = {a.text(): a for a in w.findChildren(QAction)}
-labels = ("E-postayla gönder…", "Bulut klasörüne kaydet…", "Dosya konumunu aç")
-check("menü: Paylaş altında üç eylem", all(t in acts for t in labels))
+labels = ("Bulut klasörüne kaydet…", "Dosya konumunu aç")
+check("menü: Paylaş altında iki eylem", all(t in acts for t in labels))
 check("menüde 'Paylaş' alt menüsü var", any(m.title() == "Paylaş" for m in w.findChildren(QMenu)))
 check("belge yokken eylemler pasif", not any(acts[t].isEnabled() for t in labels))
-check("belge yokken çağrı uyarı verir, hata yok", w.share_email() is None and w.share_cloud() is None and w.share_reveal() is None and len(toasts) == 3)
+check("belge yokken çağrı uyarı verir, hata yok", w.share_cloud() is None and w.share_reveal() is None and len(toasts) == 2)
 
 SRC = os.path.join(tmp, "belge.pdf")
 d = fitz.open()
@@ -153,27 +129,16 @@ opened = []
 _orig_open = QDesktopServices.openUrl
 QDesktopServices.openUrl = staticmethod(lambda u: (opened.append(u.toString()), True)[1])
 popen_calls = []
-_orig_popen, _orig_find = sharing._popen, sharing.find_outlook
+_orig_popen = sharing._popen
 sharing._popen = lambda cmd: popen_calls.append(list(cmd))
 
-# e-posta: Outlook yok -> klasör + mailto (sahte QDesktopServices)
-sharing.find_outlook = lambda reg_lookup=None: None
-mode = w.share_email()
-check("e-posta (Outlook yok): mailto + klasör açıldı", mode == "mailto" and len(opened) == 2 and opened[0].startswith("file:///") and opened[1].startswith("mailto:"), str(opened))
-check("e-posta (Outlook yok): özgün dosyanın klasörü", os.path.basename(os.path.normpath(os.path.dirname(opened[0].replace("file:///", "")))) == os.path.basename(tmp) or tmp.replace("\\", "/") in opened[0].replace("%20", " "))
-check("e-posta (Outlook yok): bilgi iletisi", any("sürükleyip" in t for t in toasts))
-# Outlook var -> ekli ileti
-opened.clear()
-sharing.find_outlook = lambda reg_lookup=None: exe
-mode = w.share_email()
-check("e-posta (Outlook var): /a ile ekli ileti, mailto açılmaz", mode == "outlook" and popen_calls[-1] == [exe, "/a", os.path.abspath(SRC)] and opened == [], str(popen_calls))
-# kaydedilmemiş değişiklik -> işaretli kopya gönderilir
+# kaydedilmemiş değişiklik -> işaretli kopya yazılır
 w.add_annotation(TextAnnotation(QRectF(72, 200, 250, 30), "ISARET PAYLASIM", QColor("#c0392b"), 16))
 w._mark_dirty()
-mode = w.share_email()
-shared = popen_calls[-1][2]
-check("değişmiş belge: işaretli kopya geçici klasörden gönderilir, özgün değişmez", mode == "outlook" and mw_share.SHARE_TMP in shared and shared.endswith("_isaretli.pdf")
+shared = w._share_file(s)
+check("değişmiş belge: işaretli kopya geçici klasöre yazılır, özgün değişmez", mw_share.SHARE_TMP in shared and shared.endswith("_isaretli.pdf")
       and "PAYLASIM" in fitz.open(shared)[0].get_text() and "PAYLASIM" not in fitz.open(SRC)[0].get_text(), shared)
+check("e-posta izi yok", not hasattr(w, "share_email") and not hasattr(sharing, "compose_email") and not hasattr(sharing, "find_outlook"))
 # konum
 w._mark_saved(s)
 popen_calls.clear()
@@ -210,7 +175,7 @@ fakes.clear()
 toasts.clear()
 check("bulut: klasör yoksa uyarı, dosya yazılmaz", w.share_cloud() is None and any("bulunamadı" in t for t in toasts))
 sharing.cloud_folders = _orig_cf
-sharing._popen, sharing.find_outlook = _orig_popen, _orig_find
+sharing._popen = _orig_popen
 QDesktopServices.openUrl = _orig_open
 for x in w.sessions:
     x.dirty = False
