@@ -459,6 +459,7 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 * **Son açılanlar:** her girdinin yanında **×** (yalnız listeden gizler, dosya silinmez; uygulama yeniden açılınca geri gelir) + *Listeyi temizle*.
 * **Sekmeler:** uzun adlarda başı ve uzantı görünür, tam ad ipucunda; değişmiş belge kırmızı ●; sekme genişliği Ayarlar → Görünüm'de. *Düğmelerde yazı göster* seçeneği (Geri al/Yinele).
 * **Birleştir / Böl (Dosya ▸ Birleştir ve böl):** dosya başına sayfa aralığı (`1-3, 5, 8-`), sürükleyerek sıralama, klasörden ekleme ve küçük resim önizleme; bölme: aralıklarla, her N sayfada bir, yer imine göre, her sayfa ayrı; birden çok PDF'i aynı kuralla bölme, ad şablonu `{ad}_{n}`.
+* **Telefon aktarımı (L3):** pencere iki sekme: **Telefondan al** (gelenler küçük resimli; her satırda Tara · Aç · PDF'e çevir · Klasörde göster; gelen fotoğraflarda tarayıcı otomatik açılır, sonrakiler aynı pencereye eklenir) ve **Telefona gönder** (açık belge ya da seçilen birden çok dosya). Telefon sayfasında *Belge tara / Fotoğraf olarak / PDF olarak* seçilir, birden çok dosya gönderilir. Ayarlar → Telefon aktarımı: boşta süresi, boyut sınırı, PIN varsayılanı, otomatik açma.
 * **Karşılama ekranı:** Aç · Tara · Telefondan al · Birleştir · Böl kartları.
 * Telefon aktarımı "boşta kaldı" bildirimi artık yalnızca bir kez çıkar; şekil (dikdörtgen/elips) kenarları yuvarlak uçlu ve PDF çıktısında aynı.
 

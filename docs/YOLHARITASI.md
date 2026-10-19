@@ -171,7 +171,7 @@ Ortak ilkeler: yeni ayar = `QSettings` anahtarı + Tercihler'de görünür; yeni
 - `pdfops.py`: `parse_ranges(metin, sayfa_sayisi)` (geçersizde `ValueError` ve Türkçe ileti), `merge(kaynaklar[(yol, aralık)], out)`, `split(...)`; çıktı `.part` + `os.replace`; iptal/ilerleme (`BackgroundJob`).
 **Bitti ölçütü:** `check_pdfops.py`: aralık ayrıştırma (hatalı girdiler), merge/split sayfa sayıları ve sırası, yer imine göre bölme, iptalde dosya kalmaz; UI testi: önizleme sayfa sayısı seçimle eşleşir.
 
-## L3 — Telefon aktarımı: Al / Gönder sekmeleri, telefon web arayüzü, otomatik tarama
+## L3 — Telefon aktarımı: Al / Gönder sekmeleri, telefon web arayüzü, otomatik tarama (TAMAM)
 **Önce oku:** `ui/share.py` (`ShareDialog`), `qrshare.py` (`PAGE`, yollar). Güvenlik kuralları (anahtar, PIN, uzantı+imza, boyut sınırı) **değişmez**.
 **Yapılacak**
 - `ShareDialog`: iki sekme **Telefondan al** / **Telefona gönder**. *Al:* büyük QR + adres; gelenler küçük resimli liste; her satırda **Tara · Aç · PDF'e çevir · Klasörde göster**; seçenek "Gelen fotoğraflar gelince tarayıcıyı otomatik aç" (ayar; varsayılan açık) ve ilk fotoğrafta pencere kendiliğinden açılır, sonrakiler aynı pencereye eklenir. *Gönder:* açık belge ya da seçilen birden çok dosya; telefonda indirme listesi.

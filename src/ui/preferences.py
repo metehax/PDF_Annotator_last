@@ -34,6 +34,7 @@ SEARCH_ENTRIES = (
     ("Çıktıları çalışma klasörüne kaydet", "Çalışma klasörü"),
     ("Son kullanılan klasörü hatırla", "Genel"), ("Birlikte aç listesi", "Genel"),
     ("Taranan belgelerin klasörü", "Tarama"), ("Telefondan gelen dosyaların klasörü", "Telefon aktarımı"),
+    ("Telefon aktarımı boşta süresi / boyut sınırı / PIN", "Telefon aktarımı"),
     ("Güncellemeleri denetle", "Güncelleme"), ("Klavye kısayolları", "Kısayollar"),
 )
 
@@ -213,8 +214,28 @@ class PreferencesDialog(QDialog):
     def _page_phone(self, v):
         v.addWidget(_section("Telefon aktarımı"))
         v.addWidget(self._kind_box("inbox"))
-        v.addWidget(_note("Telefondan gelen dosyalar bu klasöre kaydedilir. Pencere kapanınca ya da 15 dk boşta kalınca "
+        v.addWidget(_note("Telefondan gelen dosyalar bu klasöre kaydedilir. Pencere kapanınca ya da boşta süresi dolunca "
                           "sunucu kendiliğinden durur."))
+        self.sp_idle = QSpinBox()
+        self.sp_idle.setRange(1, 240)
+        self.sp_idle.setSuffix(" dk")
+        self.sp_max = QSpinBox()
+        self.sp_max.setRange(1, 1024)
+        self.sp_max.setSuffix(" MB")
+        self.chk_pin = QCheckBox("Yerel ağda da PIN iste (varsayılan)")
+        self.chk_autoscan = QCheckBox("Gelen fotoğraflar gelince tarayıcıyı otomatik aç")
+        for label, w in (("Boşta durma süresi", self.sp_idle), ("Dosya boyut sınırı", self.sp_max)):
+            row = QHBoxLayout()
+            row.addWidget(QLabel(label))
+            row.addStretch(1)
+            row.addWidget(w)
+            v.addLayout(row)
+        v.addWidget(self.chk_pin)
+        v.addWidget(self.chk_autoscan)
+        self.sp_idle.valueChanged.connect(lambda x: self._set("share/idle_min", x))
+        self.sp_max.valueChanged.connect(lambda x: self._set("share/max_mb", x))
+        self.chk_pin.toggled.connect(lambda x: self._set("share/pin_default", bool(x)))
+        self.chk_autoscan.toggled.connect(lambda x: self._set("share/auto_scan", bool(x)))
 
     def _page_update(self, v):
         v.addWidget(_section("Güncelleme"))
@@ -274,6 +295,10 @@ class PreferencesDialog(QDialog):
         self.chk_last.setChecked(workspace.remember_last())
         from mw_update import auto_enabled
         self.chk_upd.setChecked(auto_enabled(st))
+        self.sp_idle.setValue(int(st.value("share/idle_min", 15) or 15))
+        self.sp_max.setValue(int(st.value("share/max_mb", 200) or 200))
+        self.chk_pin.setChecked(str(st.value("share/pin_default", False)).lower() in ("1", "true"))
+        self.chk_autoscan.setChecked(str(st.value("share/auto_scan", True)).lower() in ("1", "true"))
         has_url = bool(self._main.update_url())
         self.chk_upd.setEnabled(has_url)
         self.btn_upd.setEnabled(has_url)
@@ -330,6 +355,10 @@ class PreferencesDialog(QDialog):
         hook = getattr(self._main, "restart_recovery", None)
         if hook:
             hook()
+
+    def _set(self, key: str, value):
+        if not self._loading:
+            self._main.settings.setValue(key, value)
 
     def _upd_changed(self, on: bool):
         if not self._loading:

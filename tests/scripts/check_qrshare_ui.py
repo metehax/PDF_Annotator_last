@@ -135,6 +135,7 @@ check("kaldırınca indirme yok", srv.listing() == [])
 # foto -> tarayıcı kuyruğu
 check("tarayıcı seçeneği kapalıyken düğme pasif", not dlg.chk_scan.isChecked() and not dlg.btn_scan.isEnabled())
 dlg.chk_scan.setChecked(True)
+dlg.chk_autoscan.setChecked(False)
 ns = len(w.sessions)
 for nm in ("sayfa1.jpg", "sayfa2.jpg"):
     box = bg(lambda nm=nm: post(url, photo, nm))

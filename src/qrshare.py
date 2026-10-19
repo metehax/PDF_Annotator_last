@@ -31,6 +31,7 @@ MAX_FILE_BYTES = 200 * 1024 * 1024
 MAX_TOTAL_BYTES = 1024 * 1024 * 1024
 MAX_FILES = 100
 PIN_DIGITS = 6
+ALLOWED_ACTIONS = ("scan", "photo", "pdf")   # X-Action: belge tara · fotoğraf olarak · PDF olarak; boş = eski davranış
 MAX_PIN_ATTEMPTS = 5
 COOKIE_NAME = "pdfsid"
 _RESERVED = {"con", "prn", "aux", "nul", *(f"com{i}" for i in range(1, 10)), *(f"lpt{i}" for i in range(1, 10))}
@@ -118,6 +119,7 @@ PAGE = """<!doctype html>
 h1{font-size:20px;margin:8px 0 16px}h2{font-size:15px;color:var(--muted);margin:0 0 10px}
 .card{background:var(--card);border:1px solid var(--line);border-radius:14px;padding:16px;margin-bottom:14px}
 .btn{display:block;width:100%;padding:16px;margin:0 0 10px;border:0;border-radius:12px;background:var(--accent);color:#fff;font-size:16px;font-weight:600;text-align:center}
+.opt{display:block;padding:12px 6px;font-size:16px;min-height:44px}.opt input{width:20px;height:20px;vertical-align:middle;margin-right:8px;display:inline-block}
 .btn.alt{background:transparent;color:var(--accent);border:2px solid var(--accent)}
 input[type=file]{display:none}.hint{color:var(--muted);font-size:13px;margin:6px 0 0}
 .row{padding:10px 0;border-top:1px solid var(--line);font-size:14px;word-break:break-all}.row:first-child{border-top:0}
@@ -126,15 +128,19 @@ input[type=file]{display:none}.hint{color:var(--muted);font-size:13px;margin:6px
 </style></head><body>
 <h1>Bilgisayara gönder</h1>
 <div class="card">
-<label class="btn" for="pick">Dosya veya fotoğraf seç</label>
+<h2>Ne yapılsın?</h2>
+<label class="opt"><input type="radio" name="act" value="scan" checked> Belge tara (köşe düzeltmeli)</label>
+<label class="opt"><input type="radio" name="act" value="photo"> Fotoğraf olarak gönder</label>
+<label class="opt"><input type="radio" name="act" value="pdf"> PDF olarak gönder</label>
+<label class="btn" for="pick">Dosya veya fotoğraf seç (birden çok olabilir)</label>
 <input id="pick" type="file" multiple accept=".pdf,image/*,application/pdf">
 <label class="btn alt" for="cam">Kamerayla çek</label>
 <input id="cam" type="file" accept="image/*" capture="environment">
 <p class="hint">PDF ve resim dosyaları kabul edilir (en çok __MAX__ MB). Dosyalar doğrudan bilgisayardaki uygulamada açılır.</p>
-<div id="up"></div></div>
+<div id="up"></div><p class="hint" id="sum"></p></div>
 <div class="card" id="dlcard" style="display:none"><h2>Bilgisayardan indir</h2><div id="dl"></div></div>
 <script>
-const $=s=>document.querySelector(s);let queue=[],busy=false;
+const $=s=>document.querySelector(s);let queue=[],busy=false,sent=0;
 function add(files){for(const f of files)queue.push(f);next()}
 $('#pick').onchange=e=>{add(e.target.files);e.target.value=''};
 $('#cam').onchange=e=>{add(e.target.files);e.target.value=''};
@@ -145,9 +151,9 @@ const t=document.createElement('div');t.textContent=f.name+' ('+(f.size/1048576)
 const bar=document.createElement('div');bar.className='bar';const fill=document.createElement('i');bar.appendChild(fill);
 const st=document.createElement('div');row.append(t,bar,st);$('#up').prepend(row);
 if(f.size>MAXB){st.className='bad';st.textContent='✕ Dosya çok büyük (en çok __MAX__ MB)';busy=false;next();return}
-const x=new XMLHttpRequest();x.open('POST','up');x.setRequestHeader('X-Filename',encodeURIComponent(f.name));
+const x=new XMLHttpRequest();x.open('POST','up');x.setRequestHeader('X-Filename',encodeURIComponent(f.name));x.setRequestHeader('X-Action',(document.querySelector('input[name=act]:checked')||{}).value||'photo');
 x.upload.onprogress=e=>{if(e.lengthComputable)fill.style.width=(100*e.loaded/e.total)+'%'};
-const done=(ok,msg)=>{st.className=ok?'ok':'bad';st.textContent=msg;busy=false;next()};
+const done=(ok,msg)=>{if(ok){sent++;$('#sum').textContent='Gönderilen: '+sent+' dosya'}st.className=ok?'ok':'bad';st.textContent=msg;busy=false;next()};
 x.onload=()=>{let r={};try{r=JSON.parse(x.responseText)}catch(_){}
 if(x.status==200&&r.ok){fill.style.width='100%';done(true,'✓ Gönderildi')}else done(false,'✕ '+(r.error||('Hata '+x.status)))};
 x.onerror=()=>done(false,'✕ Bağlantı hatası');x.send(f)}
@@ -361,6 +367,9 @@ class _Handler(BaseHTTPRequestHandler):
             return reject(413, f"Dosya çok büyük (en çok {sh.max_bytes // (1024 * 1024)} MB).")
         if sh.received_count >= MAX_FILES or sh.received_bytes + length > MAX_TOTAL_BYTES:
             return reject(429, "Bu oturum için dosya sınırına ulaşıldı.")
+        action = (self.headers.get("X-Action", "") or "").strip().lower()
+        if action and action not in ALLOWED_ACTIONS:
+            return reject(400, "Bilinmeyen işlem.")
         name = sanitize_filename(unquote(self.headers.get("X-Filename", "")))
         ext = os.path.splitext(name)[1]
         if ext not in ALLOWED_EXTS:
@@ -393,6 +402,7 @@ class _Handler(BaseHTTPRequestHandler):
             return self._json(400, {"ok": False, "error": str(ex) or "Yükleme başarısız."}, close=True)
         sh.received_count += 1
         sh.received_bytes += length
+        sh.actions[dest] = action
         self._json(200, {"ok": True, "name": os.path.basename(dest)})
         if sh.on_received:
             try:
@@ -419,6 +429,7 @@ class ShareServer:
         self.failed_attempts = 0
         self._sessions: set = set()
         self.received_count = 0
+        self.actions: dict = {}                          # kaydedilen yol → X-Action ("" = belirtilmedi)
         self.received_bytes = 0
         self._offers: List[dict] = []
         self._lock = threading.Lock()
