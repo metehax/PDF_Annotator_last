@@ -2,3 +2,7 @@
 __pycache__/
 *.pyc
 tessdata/*.traineddata
+.buildvenv/
+build/
+dist/
+build_log.txt

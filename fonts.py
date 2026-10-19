@@ -13,7 +13,9 @@ from typing import Dict, List, Optional, Tuple
 FONT_FAMILIES: List[str] = ["Arial", "Calibri", "Times New Roman", "Roboto"]
 DEFAULT_FAMILY = "Arial"
 
-_APP_DIR = os.path.dirname(os.path.abspath(__file__))
+from appinfo import app_dir
+
+_APP_DIR = app_dir()
 _BUNDLED_DIR = os.path.join(_APP_DIR, "fonts")
 _WIN_DIRS = [
     r"C:\Windows\Fonts",

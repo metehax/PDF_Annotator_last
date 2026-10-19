@@ -470,3 +470,9 @@ Düzeltilebilenler onay kutularıyla seçilir; dil ve başlık yerinde düzenlen
 
 ## Hata günlüğü (sağlamlık)
 Beklenmeyen hatalar uygulamayı kapatmaz; `Belgeler\PDF Annotator\Gunlukler\pdfannotator.log` dosyasına yazılır (yerel çökme izi: `yerel_cokme.log`). Uyarıdaki "Günlüğü aç" düğmesi klasörü açar. Hata bildirirken bu dosyayı ekleyin.
+
+## Sürüm 1.0.0 ve tek başına çalışan derleme (K1)
+- Sürüm/ad/yayıncı **tek kaynak**: `appinfo.py` (Hakkında penceresi, başlık, exe sürüm bilgisi buradan okunur).
+- `build.bat` → temiz `.buildvenv` kurar (Python 3.12 varsa onu seçer), `requirements.txt` + PyInstaller, `app.ico` üretir (`make_icon.py`), `pdfannotator.spec` ile **onedir** derler, sonda `--selftest` çalıştırır. Çıktı: `dist\PDF Annotator\PDF Annotator.exe` (Python kurulu olmayan bilgisayarda çalışır; `tessdata\tur+eng` gerekir).
+- `PDF Annotator.exe --selftest [dosya]`: pencere açmadan modülleri, tessdata/fontları, ikonları, render, OCR, Word/Excel, QR ve tarama çekirdeğini sınar; sonucu `selftest.txt`a yazar, hata varsa çıkış kodu 1.
+- `pyi_hooks/hook-workflow.py` boş kancadır: `pyinstaller-hooks-contrib` aynı adlı bir PyPI paketi için kanca taşıdığından `workflow.py` ile çakışırdı. `pymupdf.layout`/`onnxruntime` pakete alınmaz (gerekmez, model dosyası eksik kalıp açılışı çökertir).

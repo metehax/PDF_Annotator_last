@@ -28,6 +28,7 @@ from pdf_engine import IMAGE_EXTS, PasswordRequired, PDFDocument, is_image_path,
 from fonts import register_app_fonts
 from ui import theme as ui_theme
 from ui.icons import icon
+from appinfo import APP_TITLE, DESCRIPTION, PUBLISHER, VERSION
 import docsec
 import crashguard
 import workspace
@@ -65,7 +66,7 @@ class MainWindow(
 ):
     def __init__(self):
         super().__init__()
-        self.setWindowTitle("PDF İşaretleme Aracı")
+        self.setWindowTitle(APP_TITLE)
         self.setWindowIcon(icon("app", "accent"))
         self.resize(1560, 940)
         self.setMinimumWidth(680)
@@ -476,6 +477,8 @@ class MainWindow(
     # -- Windows "Birlikte aç" kaydı ---------------------------------------------
     @staticmethod
     def _launcher():
+        if getattr(sys, "frozen", False):                # PyInstaller: exe kendisi başlatıcıdır
+            return sys.executable, None
         exe = sys.executable
         if os.path.basename(exe).lower() == "python.exe":
             cand = os.path.join(os.path.dirname(exe), "pythonw.exe")
@@ -501,14 +504,14 @@ class MainWindow(
         base = r"Software\Classes"
         try:
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}") as k:
-                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, "PDF İşaretleme Aracı belgesi")
-                winreg.SetValueEx(k, "FriendlyTypeName", 0, winreg.REG_SZ, "PDF İşaretleme Aracı belgesi")
+                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, f"{APP_TITLE} belgesi")
+                winreg.SetValueEx(k, "FriendlyTypeName", 0, winreg.REG_SZ, f"{APP_TITLE} belgesi")
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}\DefaultIcon") as k:
                 winreg.SetValueEx(k, None, 0, winreg.REG_SZ, f"{exe},0")
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}\shell\open") as k:
-                winreg.SetValueEx(k, "FriendlyAppName", 0, winreg.REG_SZ, "PDF İşaretleme Aracı")
+                winreg.SetValueEx(k, "FriendlyAppName", 0, winreg.REG_SZ, APP_TITLE)
             with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{APP_ID}\shell\open\command") as k:
-                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, f'"{exe}" "{script}" "%1"')
+                winreg.SetValueEx(k, None, 0, winreg.REG_SZ, f'"{exe}" "{script}" "%1"' if script else f'"{exe}" "%1"')
             for ext in exts:
                 with winreg.CreateKey(winreg.HKEY_CURRENT_USER, rf"{base}\{ext}\OpenWithProgids") as k:
                     winreg.SetValueEx(k, APP_ID, 0, winreg.REG_NONE, b"")
@@ -657,8 +660,8 @@ class MainWindow(
 
     def _show_about(self):
         QMessageBox.about(self, "Hakkında",
-                          "<b>PDF İşaretleme Aracı</b><br><br>PDF ve resimler için işaretleme, "
-                          "düzenleme, OCR, filigran ve karşılaştırma aracı.<br>PySide6 + PyMuPDF")
+                          f"<b>{APP_TITLE}</b> &nbsp; sürüm {VERSION}<br><br>{DESCRIPTION}.<br>"
+                          f"PySide6 + PyMuPDF<br><span style='color:gray'>{PUBLISHER}</span>")
 
     # =====================================================================
     # Araç / renk seçimi
@@ -780,9 +783,9 @@ class MainWindow(
                 + (f"\nParola koruması: {sec.describe()}" if sec is not None and sec.active else ""))
         if self.active_session is not None:
             mark = "● " if self._is_dirty(self.active_session) else ""
-            self.setWindowTitle(f"{mark}{self.active_session.title} — PDF İşaretleme Aracı")
+            self.setWindowTitle(f"{mark}{self.active_session.title} — {APP_TITLE}")
         else:
-            self.setWindowTitle("PDF İşaretleme Aracı")
+            self.setWindowTitle(APP_TITLE)
         if self.active_session in self.sessions:
             self.doc_tabbar.setCurrentIndex(self.sessions.index(self.active_session))
         self.doc_tabbar.blockSignals(False)
@@ -1005,6 +1008,9 @@ class _ErrorBridge(QObject):
 
 
 def main():
+    if "--selftest" in sys.argv:
+        import selftest
+        sys.exit(selftest.run(sys.argv))
     app = QApplication(sys.argv)
     files = [os.path.abspath(a) for a in sys.argv[1:] if os.path.isfile(a)]
     if _send_to_running_instance(files):
