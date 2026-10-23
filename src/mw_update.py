@@ -14,7 +14,9 @@ import time
 from typing import Optional
 
 from PySide6.QtCore import QTimer
-from PySide6.QtWidgets import QMessageBox, QProgressDialog
+from PySide6.QtWidgets import (
+    QDialog, QDialogButtonBox, QHBoxLayout, QLabel, QMessageBox, QProgressDialog, QTextBrowser, QVBoxLayout,
+)
 
 import appinfo
 import convert
@@ -72,21 +74,53 @@ class UpdateMixin:
         if info is None:
             self.toasts.show("Gösterilecek sürüm notu yok; önce güncellemeleri denetleyin.", "info")
             return
-        QMessageBox.information(self, f"Sürüm {info.version}", info.notes or "Sürüm notu yok.")
+        dlg = QDialog(self)
+        dlg.setWindowTitle(f"Sürüm {info.version} — notlar")
+        dlg.resize(620, 520)
+        dlg.setSizeGripEnabled(True)
+        v = QVBoxLayout(dlg)
+        nb = QTextBrowser()
+        nb.setOpenExternalLinks(True)
+        nb.setMarkdown(info.notes or "Sürüm notu yok.")
+        v.addWidget(nb, 1)
+        bb = QDialogButtonBox(QDialogButtonBox.StandardButton.Close)
+        bb.rejected.connect(dlg.reject)
+        v.addWidget(bb)
+        dlg.exec()
 
     # -- sunma / indirme ------------------------------------------------------------
     def _ask_update(self, info) -> bool:
-        box = QMessageBox(self)
-        box.setIcon(QMessageBox.Icon.Information)
-        box.setWindowTitle("Yeni sürüm var")
+        """Yeni sürüm penceresi: yeniden boyutlanır, sürüm notları okunaklı (Markdown) ve kaydırılabilir."""
+        dlg = QDialog(self)
+        dlg.setWindowTitle("Yeni sürüm var")
+        dlg.resize(620, 560)
+        dlg.setSizeGripEnabled(True)
+        v = QVBoxLayout(dlg)
+        v.setContentsMargins(18, 16, 18, 14)
+        v.setSpacing(10)
         mb = f" ({info.size / 1048576:.0f} MB)" if info.size else ""
-        box.setText(f"<b>{appinfo.APP_TITLE} {info.version}</b> hazır{mb}.<br>Kurulu sürüm: {appinfo.VERSION}")
+        head = QLabel(f"<span style='font-size:16px'><b>{appinfo.APP_TITLE} {info.version}</b> hazır{mb}</span>"
+                      f"<br><span style='color:gray'>Kurulu sürüm: {appinfo.VERSION}</span>")
+        v.addWidget(head)
         if info.notes:
-            box.setDetailedText(info.notes)
-        yes = box.addButton("İndir ve kur", QMessageBox.ButtonRole.AcceptRole)
-        box.addButton("Sonra", QMessageBox.ButtonRole.RejectRole)
-        box.exec()
-        return box.clickedButton() is yes
+            v.addWidget(QLabel("Neler yeni:"))
+            nb = QTextBrowser()
+            nb.setOpenExternalLinks(True)
+            nb.setMarkdown(info.notes)
+            v.addWidget(nb, 1)
+        else:
+            v.addStretch(1)
+        bb = QDialogButtonBox()
+        yes = bb.addButton("İndir ve kur", QDialogButtonBox.ButtonRole.AcceptRole)
+        yes.setObjectName("primary")
+        later = bb.addButton("Sonra", QDialogButtonBox.ButtonRole.RejectRole)
+        yes.clicked.connect(dlg.accept)
+        later.clicked.connect(dlg.reject)
+        row = QHBoxLayout()
+        row.addStretch(1)
+        row.addWidget(bb)
+        v.addLayout(row)
+        return dlg.exec() == QDialog.DialogCode.Accepted
 
     def _offer_update(self, info):
         if self._ask_update(info):

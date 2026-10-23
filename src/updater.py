@@ -14,6 +14,7 @@ import hashlib
 import json
 import os
 import re
+import ssl
 import subprocess
 import sys
 import tempfile
@@ -83,9 +84,20 @@ class _SafeRedirect(urllib.request.HTTPRedirectHandler):
         return super().redirect_request(req, fp, code, msg, headers, newurl)
 
 
+def _ssl_context() -> ssl.SSLContext:
+    """Sertifikaları Windows'un kendi güven deposuyla doğrular (truststore). Şirket ağlarında HTTPS denetimi yapan
+    güvenlik duvarı sertifikası Windows'ta tanımlıdır; Python'un kendi listesi onu tanımaz ("unable to get local issuer
+    certificate"). Doğrulama KAPATILMAZ; paket yoksa standart bağlama düşülür."""
+    try:
+        import truststore
+        return truststore.SSLContext(ssl.PROTOCOL_TLS_CLIENT)
+    except Exception:
+        return ssl.create_default_context()
+
+
 def _open(url: str):
     _check_url(url)
-    opener = urllib.request.build_opener(_SafeRedirect)
+    opener = urllib.request.build_opener(_SafeRedirect, urllib.request.HTTPSHandler(context=_ssl_context()))
     req = urllib.request.Request(url, headers={
         "User-Agent": f"{appinfo.APP_NAME}/{appinfo.VERSION}", "Accept": "application/json, */*"})
     try:

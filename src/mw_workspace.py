@@ -51,6 +51,10 @@ class WorkspaceMixin:
     # -- açılış denetimleri ------------------------------------------------------
     def startup_checks(self):
         """Açılışta bir kez: eski gelen klasörü taşıma önerisi, kapanmayan belgeler, otomatik kurtarma zamanlayıcısı."""
+        try:
+            workspace.ensure_all()                     # Belgeler\PDF Annotator ve alt klasörleri ilk açılışta hazır olsun
+        except OSError:
+            pass
         self.check_migration()
         self.check_recovery()
         self.start_recovery()

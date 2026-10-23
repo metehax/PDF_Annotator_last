@@ -138,6 +138,12 @@ check("make_release: GitHub adresinden taban", make_release.base_from_update_url
     "https://api.github.com/repos/ben/depo/releases/latest", "1.0.1") == "https://github.com/ben/depo/releases/download/v1.0.1")
 check("make_release: sha256_file", make_release.sha256_file(p) == SHA)
 
+# TLS: Windows güven deposu (truststore); doğrulama kapalı değil
+import ssl
+ctx = updater._ssl_context()
+check("TLS: sertifika + ad doğrulaması zorunlu", ctx.verify_mode == ssl.CERT_REQUIRED and ctx.check_hostname)
+check("TLS: truststore (Windows güven deposu) kullanılıyor", type(ctx).__module__.startswith("truststore"))
+
 srv.shutdown()
 print(f"OZET: {sum(ok)}/{len(ok)} gecti")
 sys.exit(0 if all(ok) else 1)
