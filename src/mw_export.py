@@ -9,6 +9,9 @@ MainWindow bu mixin'i miras alır; yöntemler `self` üzerinden ana pencerenin d
 from __future__ import annotations
 
 import os
+import shutil
+import tempfile
+from typing import Optional
 
 import pymupdf as fitz
 
@@ -19,6 +22,7 @@ from models import RedactionAnnotation
 from pdf_engine import (
     IMAGE_EXTS, is_image_path, save_project_json, load_project_json,
 )
+from ui.dragout import file_mime
 from ui.watermark import WatermarkDialog
 from mw_common import OPEN_FILTER
 import workspace
@@ -28,6 +32,39 @@ class ExportMixin:
     # =====================================================================
     # Dosya: kaydet / dışa aktar / birleştir / ayır / proje
     # =====================================================================
+    # -- sürükleyip bırakma / dosya olarak kopyalama --------------------------------------
+    def export_for_drag(self) -> Optional[str]:
+        """Etkin belgenin dışarı verilecek dosyasını döndürür: değişmemiş PDF ise özgün dosya, değilse işaretlerle
+        geçici kopya (özgün ada sahip). Hata olursa None."""
+        s = self.active_session
+        if not s:
+            return None
+        if (not self._is_dirty(s) and not s.pdf.is_image and s.path.lower().endswith(".pdf")
+                and os.path.isfile(s.path) and getattr(s, "security", None) is None):
+            return s.path
+        try:
+            d = tempfile.mkdtemp(prefix="pdfann_surukle_")
+            self._drag_dirs = getattr(self, "_drag_dirs", []) + [d]
+            out = os.path.join(d, os.path.splitext(s.title)[0] + ".pdf")
+            s.pdf.export_pdf(out, s.annotations, self.font_ctx, security=getattr(s, "security", None))
+            return out
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Dosya hazırlanamadı:\n{ex}")
+            return None
+
+    def copy_file_to_clipboard(self):
+        """Belgeyi dosya olarak panoya koyar: e-posta penceresine ya da Gezgin'e Ctrl+V ile yapıştırılır."""
+        path = self.export_for_drag()
+        if not path:
+            return
+        QApplication.clipboard().setMimeData(file_mime(path))
+        self.toasts.show("Dosya panoya kopyalandı: e-postaya ya da bir klasöre yapıştırabilirsiniz.", "success")
+
+    def cleanup_drag_files(self):
+        for d in getattr(self, "_drag_dirs", []):
+            shutil.rmtree(d, ignore_errors=True)
+        self._drag_dirs = []
+
     def save_document(self):
         """Ctrl+S: PDF bulunduğu dosyanın üzerine yazılır; resim açıldıysa resim olarak kaydedilir."""
         s = self.active_session

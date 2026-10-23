@@ -34,6 +34,7 @@ from ui.formui import FormsPanel
 from ui.redactopts import RedactOptions
 from ui.sidepanel import SidePanel
 from ui.toolhelp import InfoButton
+from ui.dragout import DragOutButton
 from ui.widgets import StatusMessage, ThumbnailDelegate
 from ui.ocrdialog import _OcrTask
 from mw_common import CANVAS_TOP_INSET, TOOLS, TOOL_KEYS, TOOL_NAMES
@@ -204,6 +205,7 @@ class BuildMixin:
             self._autosave_timer.start()
         m_exp = m_file.addMenu(icon("download"), "Dışa aktar")
         self._doc_controls.append(m_exp.menuAction())
+        A(m_exp, "copy", "Dosyayı kopyala (yapıştırılabilir)", self.copy_file_to_clipboard)
         A(m_exp, "file_copy", "Kopya olarak kaydet…", self.save_pdf, "Ctrl+Alt+C")
         A(m_exp, "compress", "Sıkıştırarak kaydet…", self.save_compressed)
         A(m_exp, "image", "Resim olarak kaydet…", self.save_as_image)
@@ -473,6 +475,14 @@ class BuildMixin:
         h.addWidget(self.btn_settings)
         h.addSpacing(4)
 
+        self.btn_drag = DragOutButton(self.export_for_drag)
+        self.btn_drag.setObjectName("barBtn")
+        self.btn_drag.setIcon(icon("file"))
+        self.btn_drag.setIconSize(QSize(20, 20))
+        self.btn_drag.setFixedSize(34, 34)
+        self.btn_drag.setToolTip("Belgeyi tutup sürükleyin: e-posta penceresine (ek), klasöre ya da masaüstüne bırakın. "
+                                 "İşaretler dahil bir kopya verilir; özgün dosya değişmez.")
+        h.addWidget(self.btn_drag)
         self.btn_save = QPushButton(icon("save", "on_accent"), "Kaydet")
         self.btn_save.setObjectName("primary")
         self.btn_save.setIconSize(QSize(18, 18))
@@ -480,7 +490,7 @@ class BuildMixin:
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(self.save_document)
         h.addWidget(self.btn_save)
-        self._doc_controls += [self.btn_export, self.btn_save]
+        self._doc_controls += [self.btn_export, self.btn_save, self.btn_drag]
         self.apply_view_prefs()
         return bar
 

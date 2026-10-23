@@ -117,6 +117,7 @@ class WorkspaceMixin:
                     t.stop()
                 except RuntimeError:
                     pass
+        self.cleanup_drag_files()                       # sürükleme için hazırlanan geçici kopyalar
         self._diff_token = getattr(self, "_diff_token", 0) + 1       # bayat sonuçlar elenir
         QThreadPool.globalInstance().waitForDone(3000)
 
