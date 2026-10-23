@@ -319,7 +319,17 @@ class PDFDocument:
         if self.is_image:
             self.doc, self.native_zoom = image_to_pdf_document(path)
         else:
-            self.doc = fitz.open(path)
+            # Bellekten aç: dosya kilitlenmez, böylece "Kaydet" özgün dosyanın üzerine yazabilir
+            data = None
+            try:
+                with open(path, "rb") as f:
+                    data = f.read()
+            except OSError:
+                pass
+            if data is not None and b"%PDF-" in data[:1024]:
+                self.doc = fitz.open(stream=data, filetype="pdf")
+            else:
+                self.doc = fitz.open(path)         # uzantısı yanıltıcı / bozuk dosya: biçimi MuPDF belirlesin
         # Parolalı belge: doğru parolayla açılır; bellekteki kopya şifresiz yazılır
         self.was_encrypted = bool(getattr(self.doc, "is_encrypted", False) or self.doc.needs_pass)
         if self.doc.needs_pass:
@@ -366,6 +376,7 @@ class PDFDocument:
         self._thumb_cache.clear()
         self._lines_cache.clear()
         self.edit_cache.clear()
+        self.__dict__.setdefault("words_cache", {}).clear()
         self.layout_rev += 1
         self._page_rev.clear()
 
@@ -376,6 +387,7 @@ class PDFDocument:
         self._lines_cache.pop(index, None)
         for k in [k for k in self.edit_cache if k[0] == index]:
             self.edit_cache.pop(k, None)
+        self.__dict__.setdefault("words_cache", {}).pop(index, None)
         self._page_rev[index] = self._page_rev.get(index, 0) + 1
 
     # -- render ---------------------------------------------------------

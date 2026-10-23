@@ -11,6 +11,7 @@ from __future__ import annotations
 from typing import Optional
 
 
+import workspace
 from PySide6.QtCore import QSize, Qt, QTimer
 from PySide6.QtGui import QAction, QColor, QIntValidator, QKeySequence, QShortcut
 from PySide6.QtWidgets import (
@@ -32,6 +33,7 @@ import forms
 from ui.formui import FormsPanel
 from ui.redactopts import RedactOptions
 from ui.sidepanel import SidePanel
+from ui.toolhelp import InfoButton
 from ui.widgets import StatusMessage, ThumbnailDelegate
 from ui.ocrdialog import _OcrTask
 from mw_common import CANVAS_TOP_INSET, TOOLS, TOOL_KEYS, TOOL_NAMES
@@ -188,10 +190,21 @@ class BuildMixin:
         A(m_file, "open", "Aç…", self.open_pdf, "Ctrl+O", needs_doc=False)
         self.recent_menu = m_file.addMenu(icon("reset"), "Son açılanlar")
         m_file.addSeparator()
-        A(m_file, "save", "Kopya olarak kaydet…", self.save_document, "Ctrl+S")
+        A(m_file, "save", "Kaydet", self.save_document, "Ctrl+S")
+        A(m_file, "file", "Farklı kaydet…", self.save_pdf_as, "Ctrl+Shift+S")
+        A(m_file, "save", "Tümünü kaydet…", self.save_all, "Ctrl+Alt+S", needs_doc=False)
+        self.act_autosave = A(m_file, "reset", "Otomatik kaydet",
+                              self.set_autosave, checkable=True, needs_doc=False)
+        self.act_autosave.setToolTip("Değişen PDF'leri 30 sn'de bir özgün dosyanın üzerine yazar")
+        self.act_autosave.setChecked(workspace.autosave_overwrite())
+        self._autosave_timer = QTimer(self)
+        self._autosave_timer.setInterval(30000)
+        self._autosave_timer.timeout.connect(self._autosave_tick)
+        if self.act_autosave.isChecked():
+            self._autosave_timer.start()
         m_exp = m_file.addMenu(icon("download"), "Dışa aktar")
         self._doc_controls.append(m_exp.menuAction())
-        A(m_exp, "file", "PDF olarak kaydet…", self.save_pdf, "Ctrl+Shift+S")
+        A(m_exp, "file_copy", "Kopya olarak kaydet…", self.save_pdf, "Ctrl+Alt+C")
         A(m_exp, "compress", "Sıkıştırarak kaydet…", self.save_compressed)
         A(m_exp, "image", "Resim olarak kaydet…", self.save_as_image)
         A(m_exp, "watermark", "Filigranlı PDF olarak kaydet…", self.save_pdf_with_watermark)
@@ -241,6 +254,8 @@ class BuildMixin:
         A(m_edit, "select", "Sayfadaki tüm işaretleri seç", self.select_all_annotations, QKeySequence.StandardKey.SelectAll)
         m_edit.addSeparator()
         A(m_edit, "trash", "Seçileni sil", self.delete_selected, QKeySequence.StandardKey.Delete)
+        A(m_edit, "file_copy", "Seçili işareti diğer sayfalara uygula…", self.apply_selected_to_pages)
+        A(m_edit, "text_select", "Sayfadaki tüm metni kopyala", self.copy_page_text, "Ctrl+Shift+C")
         m_edit.addSeparator()
         A(m_edit, "search", "Bul…", self._focus_search, "Ctrl+F")
         A(m_edit, "sliders", "Komut paleti…", self.open_palette, "Ctrl+K", needs_doc=False)
@@ -458,10 +473,10 @@ class BuildMixin:
         h.addWidget(self.btn_settings)
         h.addSpacing(4)
 
-        self.btn_save = QPushButton(icon("save", "on_accent"), "Kopya kaydet")
+        self.btn_save = QPushButton(icon("save", "on_accent"), "Kaydet")
         self.btn_save.setObjectName("primary")
         self.btn_save.setIconSize(QSize(18, 18))
-        self.btn_save.setToolTip("İşaretli kopyayı yeni dosya olarak kaydeder; özgün dosya değişmez (Ctrl+S)")
+        self.btn_save.setToolTip("Belgeyi bulunduğu dosyanın üzerine kaydeder (Ctrl+S). Özgün dosyayı korumak için Dosya › Dışa aktar › Kopya olarak kaydet")
         self.btn_save.setCursor(Qt.CursorShape.PointingHandCursor)
         self.btn_save.clicked.connect(self.save_document)
         h.addWidget(self.btn_save)
@@ -576,6 +591,7 @@ class BuildMixin:
         self.view.noteEditRequested.connect(self.edit_note)
         self.view.editTextRequested.connect(self.on_edit_text_requested)
         self.view.cropRequested.connect(self.on_crop_requested)
+        self.view.textRectRequested.connect(self.on_text_rect_requested)
         self.view.imagePlaceRequested.connect(self.on_image_place_requested)
         self.view.form_hit = self._form_hit
         self.view.formFieldClicked.connect(self.on_form_field_clicked)
@@ -807,7 +823,7 @@ class BuildMixin:
                 h.addWidget(inline)
                 hints = hints[1:]
             if hints:
-                info = QToolButton()
+                info = InfoButton("<br><br>".join(t.replace("\n", "<br>") for t in hints))
                 info.setObjectName("barBtn")
                 info.setIcon(icon("warning" if warn else "info", "accent" if not warn else "default"))
                 info.setIconSize(QSize(18, 18))
@@ -921,6 +937,8 @@ class BuildMixin:
             self.redact_opts,
             self._color_row("Özel renk", "redact_color"),
             self.chk_redact_final,
+            self._checkbox_row("Tüm sayfalarda aynı yere uygula", "repeat_pages",
+                               "Aynı şablonlu belgelerde: çizdiğiniz kutu diğer sayfalarda aynı konuma da konur"),
             redact_warn,
             self._hint("Kaydedince altındaki metin ve resim PDF'ten KALICI silinir. Düzenlerken kutu "
                        "yumuşak (yarı saydam) görünür; çıktıda tam dolgudur. Dikkatli çizin.", warn=True),
@@ -930,6 +948,8 @@ class BuildMixin:
         self.prop_stack.addWidget(page(
             self._combo_row("Biçim", [("Bulanık", "blur"), ("Mozaik", "pixel")],
                             lambda v: setattr(self.state, "blur_mode", v)),
+            self._checkbox_row("Tüm sayfalarda aynı yere uygula", "repeat_pages",
+                               "Aynı şablonlu belgelerde: çizdiğiniz alan diğer sayfalarda aynı konuma da konur"),
             self._slider_row("Güç", 2, 40, int(self.state.blur_strength),
                              lambda v: setattr(self.state, "blur_strength", float(v))),
             self._hint("Bir alanı sürükleyip bırakın. Dışa aktarırken alan görüntü olarak "
@@ -1040,6 +1060,17 @@ class BuildMixin:
         ))
         self._tool_pages["sign"] = idx; idx += 1
 
+        self.chk_auto_ocr = QCheckBox("Otomatik OCR (taranmış sayfalar)")
+        self.chk_auto_ocr.setChecked(workspace.auto_ocr_enabled())
+        self.chk_auto_ocr.toggled.connect(lambda v: (workspace.set_auto_ocr_enabled(v), self.auto_ocr_kick()))
+        self.prop_stack.addWidget(page(
+            self.chk_auto_ocr,
+            self._hint("Metnin üzerinde bir alan sürükleyin; alandaki metin panoya kopyalanır. Taranmış "
+                       "PDF ve resimlerde metin otomatik OCR ile okunur (ilk okuma birkaç saniye sürebilir). "
+                       "Tüm sayfa: Düzenle › Sayfadaki tüm metni kopyala."),
+        ))
+        self._tool_pages["copytext"] = idx; idx += 1
+
         self.prop_stack.addWidget(page(
             self._hint("Bir alan sürükleyip bırakın; açılan pencereden PNG "
                       "olarak kaydedebilir ya da panoya kopyalayabilirsiniz.\n\n"
@@ -1073,6 +1104,9 @@ class BuildMixin:
             pg = self.prop_stack.widget(idx)
             if not pg.title_label.text():
                 pg.title_label.setText("Şekil" if key in ("rect", "oval") else TOOL_NAMES[key])
+            for ib in pg.findChildren(InfoButton):
+                ib.tool = key
+                ib.title = f"{pg.title_label.text()} — nasıl kullanılır?"
         return self.prop_stack
 
     def _build_layers_tab(self):

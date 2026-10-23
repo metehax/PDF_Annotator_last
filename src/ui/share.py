@@ -60,7 +60,7 @@ class ShareDialog(QDialog):
     def __init__(self, main, host: Optional[str] = None, receive_dir: Optional[str] = None):
         super().__init__(main)
         self.setWindowTitle("Telefonla aktar (QR)")
-        self.resize(580, 760)
+        self.resize(980, 640)
         self._main = main
         self._server: Optional[qrshare.ShareServer] = None
         self._tmp: Optional[str] = None
@@ -83,18 +83,29 @@ class ShareDialog(QDialog):
         self.hint.setWordWrap(True)
         v.addWidget(self.hint)
 
+        # iki sütun: solda QR + ağ ayarları, sağda aktarım sekmeleri (dikeyde kısa, yatayda geniş)
+        body = QHBoxLayout()
+        body.setSpacing(18)
+        left = QVBoxLayout()
+        left.setSpacing(8)
+        right = QVBoxLayout()
+        right.setSpacing(8)
+        body.addLayout(left, 0)
+        body.addLayout(right, 1)
+        v.addLayout(body, 1)
+
         self.qr = QLabel()
         self.qr.setFixedSize(QR_PX + 24, QR_PX + 24)
         self.qr.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.qr.setStyleSheet("background:#ffffff; border-radius:12px;")
-        v.addWidget(self.qr, 0, Qt.AlignmentFlag.AlignHCenter)
+        left.addWidget(self.qr, 0, Qt.AlignmentFlag.AlignHCenter)
 
         self.url_lbl = QLabel()
         self.url_lbl.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.url_lbl.setAlignment(Qt.AlignmentFlag.AlignCenter)
         self.url_lbl.setWordWrap(True)
         self.url_lbl.setContentsMargins(0, 8, 0, 4)
-        v.addWidget(self.url_lbl)
+        left.addWidget(self.url_lbl)
         row = QHBoxLayout()
         self.ip_combo = QComboBox()
         self.ip_combo.setToolTip("Birden fazla ağ varsa telefonun bağlı olduğu ağın adresini seçin")
@@ -104,15 +115,15 @@ class ShareDialog(QDialog):
         self.btn_copy.clicked.connect(self._copy_url)
         row.addWidget(QLabel("Ağ adresi:"))
         row.addWidget(self.ip_combo, 1)
-        row.addWidget(self.btn_copy)
-        v.addLayout(row)
+        left.addLayout(row)
+        left.addWidget(self.btn_copy)
 
         # -- aynı ağda değil misiniz? ----------------------------------------------
         self.btn_help = QPushButton("Aynı ağda değil misiniz?")
         self.btn_help.setObjectName("secondary")
         self.btn_help.setCheckable(True)
         self.btn_help.toggled.connect(lambda on: self.help_box.setVisible(on))
-        v.addWidget(self.btn_help)
+        left.addWidget(self.btn_help)
         self.help_box = QWidget()
         hb = QVBoxLayout(self.help_box)
         hb.setContentsMargins(0, 0, 0, 0)
@@ -125,12 +136,13 @@ class ShareDialog(QDialog):
         self.btn_wifi.clicked.connect(lambda: QDesktopServices.openUrl(QUrl(WIFI_SETTINGS_URL)))
         hb.addWidget(self.btn_wifi)
         self.help_box.hide()
-        v.addWidget(self.help_box)
+        left.addWidget(self.help_box)
+        left.addStretch(1)
 
         # -- gelişmiş: kendi internet tüneli + PIN ----------------------------------
         self.chk_tunnel = QCheckBox("Gelişmiş: kendi internet tünelimi kullanacağım (PIN'li)")
         self.chk_tunnel.toggled.connect(lambda on: self.set_tunnel(on))
-        v.addWidget(self.chk_tunnel)
+        right.addWidget(self.chk_tunnel)
         self.tunnel_box = QWidget()
         tb = QVBoxLayout(self.tunnel_box)
         tb.setContentsMargins(0, 0, 0, 0)
@@ -170,7 +182,7 @@ class ShareDialog(QDialog):
         self.pin_state.setWordWrap(True)
         tb.addWidget(self.pin_state)
         self.tunnel_box.hide()
-        v.addWidget(self.tunnel_box)
+        right.addWidget(self.tunnel_box)
         self._tunnel_on = False
         self._public_base = ""
         self._pin: Optional[str] = qrshare.generate_pin() if self._pin_default else None
@@ -179,10 +191,10 @@ class ShareDialog(QDialog):
         self.lan_pin.setObjectName("hint")
         self.lan_pin.setTextInteractionFlags(Qt.TextInteractionFlag.TextSelectableByMouse)
         self.lan_pin.hide()
-        v.addWidget(self.lan_pin)
+        right.addWidget(self.lan_pin)
 
         self.tabs = QTabWidget()
-        v.addWidget(self.tabs, 1)
+        right.addWidget(self.tabs, 1)
 
         # -- sekme 1: telefondan al ---------------------------------------------------
         tab_in = QWidget()

@@ -60,6 +60,7 @@ class Command:
     icon_name: Optional[str] = None
     shortcut: str = ""
     qicon: Optional[QIcon] = None
+    keywords: str = ""                 # eş anlamlılar: başlıkta geçmese de aramada bulunur
 
 
 class CommandPalette(QFrame):
@@ -140,6 +141,10 @@ class CommandPalette(QFrame):
             if s is None and c.category:
                 s2 = score(query, f"{c.category} {c.title}")
                 s = None if s2 is None else s2 + 50
+            if s is None and c.keywords:
+                words = [x for x in query.split() if x]
+                parts = [score(x, f"{c.title} {c.keywords}") for x in words]
+                s = None if not parts or any(x is None for x in parts) else sum(parts) + 80
             if s is not None:
                 ranked.append((s, i, c))
         ranked.sort(key=lambda x: (x[0], x[1]))

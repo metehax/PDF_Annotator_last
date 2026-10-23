@@ -213,6 +213,11 @@ QDoubleSpinBox::up-button, QDoubleSpinBox::down-button {{ border:none; width:18p
 QSpinBox::up-arrow, QDoubleSpinBox::up-arrow {{ image:url("{chevron_up}"); width:12px; height:12px; }}
 QSpinBox::down-arrow, QDoubleSpinBox::down-arrow {{ image:url("{chevron}"); width:12px; height:12px; }}
 
+QFrame#sourceCard {{ background:{t['surface']}; border:1px solid {t['border']}; border-radius:12px; }}
+QFrame#sourceCard:hover {{ border-color:{t['accent']}; }}
+QFrame#sourceCard[selected="true"] {{ border:2px solid {t['accent']}; background:{t['surface2']}; }}
+QFrame#sourceCard QLabel {{ background:transparent; }}
+QLabel#cardTitle {{ font-size:14px; font-weight:600; color:{t['text']}; background:transparent; }}
 QCheckBox, QRadioButton {{ color:{t['text']}; spacing:8px; background:transparent; }}
 QCheckBox::indicator {{ width:16px; height:16px; border-radius:5px;
     border:1px solid {t['border_strong']}; background:{t['surface2']}; }}

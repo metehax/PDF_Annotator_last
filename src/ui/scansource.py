@@ -10,19 +10,65 @@ from __future__ import annotations
 from typing import List, Optional
 
 from PySide6.QtWidgets import (
-    QButtonGroup, QDialog, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
+    QButtonGroup, QDialog, QFrame, QHBoxLayout, QLabel, QLineEdit, QPushButton, QRadioButton, QVBoxLayout, QWidget,
 )
+from PySide6.QtCore import QSize, Qt
+
+from ui.icons import icon
 
 import pdfops
 
 SOURCES = ("files", "phone", "doc")
 
 
+class _SourceCard(QFrame):
+    """Büyük, tıklanabilir seçim kartı: simge + başlık + açıklama; içindeki radyo düğmesini yönetir."""
+
+    def __init__(self, radio: QRadioButton, icon_name: str, title: str, desc: str):
+        super().__init__()
+        self.radio = radio
+        self.setObjectName("sourceCard")
+        self.setCursor(Qt.CursorShape.PointingHandCursor)
+        h = QHBoxLayout(self)
+        h.setContentsMargins(14, 12, 14, 12)
+        h.setSpacing(12)
+        ic = QLabel()
+        ic.setPixmap(icon(icon_name).pixmap(QSize(30, 30)))
+        ic.setFixedSize(34, 34)
+        ic.setAlignment(Qt.AlignmentFlag.AlignCenter)
+        h.addWidget(ic)
+        col = QVBoxLayout()
+        col.setSpacing(1)
+        t = QLabel(title)
+        t.setObjectName("cardTitle")
+        d = QLabel(desc)
+        d.setObjectName("hint")
+        d.setWordWrap(True)
+        col.addWidget(t)
+        col.addWidget(d)
+        h.addLayout(col, 1)
+        radio.setText("")
+        radio.setFixedWidth(22)
+        h.addWidget(radio)
+        radio.toggled.connect(self._sync)
+        self._sync()
+
+    def _sync(self, *_):
+        self.setProperty("selected", self.radio.isChecked())
+        self.style().unpolish(self)
+        self.style().polish(self)
+
+    def mousePressEvent(self, e):
+        if self.radio.isEnabled():
+            self.radio.setChecked(True)
+        super().mousePressEvent(e)
+
+
 class ScanSourceDialog(QDialog):
     def __init__(self, main, page_count: int = 0, current_page: int = 0):
         super().__init__(main)
         self.setWindowTitle("Tara")
-        self.setMinimumWidth(440)
+        self.setMinimumWidth(480)
         self._n = page_count
         self._cur = current_page
         v = QVBoxLayout(self)
@@ -35,11 +81,17 @@ class ScanSourceDialog(QDialog):
         self.r_phone = QRadioButton("Telefondan — QR ile fotoğraf çek / gönder")
         self.r_doc = QRadioButton("Açık belge — sayfalarını temizle ve düzelt")
         self.r_files.setChecked(True)
-        for r in (self.r_files, self.r_phone, self.r_doc):
-            v.addWidget(r)
+        cards = (
+            _SourceCard(self.r_files, "folder_open", "Dosyalar", "Bilgisayardan fotoğraf ya da PDF seçin"),
+            _SourceCard(self.r_phone, "phone", "Telefondan", "QR okutun, telefonla çekin ya da gönderin"),
+            _SourceCard(self.r_doc, "scan", "Açık belge", "Açık belgenin sayfalarını temizleyip düzeltin"),
+        )
+        for c in cards:
+            v.addWidget(c)
         self.r_doc.setEnabled(page_count > 0)
         if page_count <= 0:
-            self.r_doc.setToolTip("Önce bir belge açın.")
+            cards[2].setEnabled(False)
+            cards[2].setToolTip("Önce bir belge açın.")
 
         self.doc_box = QWidget()
         d = QVBoxLayout(self.doc_box)

@@ -161,20 +161,17 @@ w.switch_session(0)
 
 # ====================== K2: kaydetme adları ve notu ======================
 acts = {a.text(): a for a in w.findChildren(QAction)}
-check("menüde yalnız 'Kaydet' adlı eylem kalmadı (anlaşılır ad)", "Kaydet" not in acts and "Kopya olarak kaydet…" in acts)
-check("Ctrl+S = Kopya olarak kaydet…", acts["Kopya olarak kaydet…"].shortcut() == QKeySequence("Ctrl+S"))
-exp_menu = next(m for m in w.findChildren(QMenu) if m.title() == "Dışa aktar")
-menus_top = {m.title(): m for m in w.findChildren(QMenu) if m.title() in ("Dosya", "Belge")}
-check("'PDF olarak kaydet…' Dışa aktar altında (yinelenen üst giriş yok), Ctrl+Shift+S",
-      any(a.text() == "PDF olarak kaydet…" and a.shortcut() == QKeySequence("Ctrl+Shift+S") for a in exp_menu.actions())
-      and not any(a.text() == "PDF olarak kaydet…" for a in menus_top["Dosya"].actions()))
-check("üst çubuk düğmesi: Kopya kaydet + 'özgün dosya değişmez' ipucu", w.btn_save.text() == "Kopya kaydet" and "özgün dosya değişmez" in w.btn_save.toolTip())
+check("Ctrl+S = Kaydet (özgün dosyanın üzerine), Ctrl+Shift+S = Farklı kaydet…",
+      acts["Kaydet"].shortcut() == QKeySequence("Ctrl+S") and acts["Farklı kaydet…"].shortcut() == QKeySequence("Ctrl+Shift+S"))
+check("'Kopya olarak kaydet…' (Dışa aktar altında), Tümünü kaydet + Otomatik kaydet menüde",
+      "Kopya olarak kaydet…" in acts and "Tümünü kaydet…" in acts and "Otomatik kaydet" in acts)
+check("üst çubuk düğmesi: Kaydet + üzerine yazar ipucu", w.btn_save.text() == "Kaydet" and "üzerine" in w.btn_save.toolTip())
 OUTP = os.path.join(tmp, "kopya.pdf")
 orig_sf = QFileDialog.getSaveFileName
 titles = []
 QFileDialog.getSaveFileName = staticmethod(lambda p, t, d="", *a, **k: (titles.append(t), (OUTP, ""))[1])
 toasts.clear()
-w.save_document()
+w.save_pdf()
 QFileDialog.getSaveFileName = orig_sf
 pump(200)
 check("kaydetme penceresi başlığı özgün dosyanın değişmediğini söyler", titles and "özgün dosya değişmez" in titles[0], str(titles))
@@ -192,7 +189,7 @@ def direct(m):
 belge = direct(menus["Belge"])
 dosya = direct(menus["Dosya"])
 check(f"Belge menüsü doğrudan öğe ≤ 10 (önceden 21): {len(belge)}", len(belge) <= 10)
-check(f"Dosya menüsü doğrudan öğe ≤ 14 (önceden 20): {len(dosya)}", len(dosya) <= 14)
+check(f"Dosya menüsü doğrudan öğe ≤ 15 (önceden 20): {len(dosya)}", len(dosya) <= 15)
 check("Belge alt menüleri: Sayfa / Numara,üstbilgi,filigran / Dönüştür ve düzleştir / Güvenlik ve gizlilik",
       [a.text() for a in belge if a.menu()] == ["Sayfa", "Numara, üstbilgi ve filigran", "Dönüştür ve düzleştir", "Güvenlik ve gizlilik"])
 sub = {a.text(): a.menu() for a in belge if a.menu()}

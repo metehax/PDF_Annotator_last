@@ -104,6 +104,7 @@ _PATHS: Dict[str, str] = {
     "printer": '<path d="M7 9V4h10v5"/><rect x="3" y="9" width="18" height="8" rx="2"/><rect x="7" y="14" width="10" height="6"/><path d="M17.5 12h.01"/>',
     "calc": '<rect x="5" y="3" width="14" height="18" rx="2"/><rect x="8" y="6" width="8" height="3"/><path d="M8.5 13h.01M12 13h.01M15.5 13h.01M8.5 17h.01M12 17h.01M15.5 17h.01"/>',
     "headfoot": '<rect x="5" y="3" width="14" height="18" rx="2"/><path d="M5 7.5h14M5 16.5h14"/><path d="M9 19h6"/>',
+    "text_select": '<path d="M4 6h16"/><path d="M4 12h10"/><path d="M4 18h16"/><path d="M17 10v6"/><path d="M15 16h4"/>',
     "crop": '<path d="M6 2v14a2 2 0 0 0 2 2h14"/><path d="M18 22V8a2 2 0 0 0-2-2H2"/>',
     # -- bilgi ---------------------------------------------------------------
     "warning": '<path d="M10.3 3.9 1.8 18a2 2 0 0 0 1.7 3h17a2 2 0 0 0 1.7-3L13.7 3.9a2 2 0 0 0-3.4 0z"/><path d="M12 9v4M12 17h.01"/>',

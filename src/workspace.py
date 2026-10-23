@@ -240,6 +240,33 @@ def migrate_old_inbox(old: Optional[str] = None) -> Tuple[int, List[str]]:
 # ---------------------------------------------------------------------------
 # otomatik kurtarma
 # ---------------------------------------------------------------------------
+def reduce_motion() -> bool:
+    """Açıksa yardım önizlemeleri animasyonsuz (durağan kare) gösterilir."""
+    return _bool("ui/reduce_motion", False)
+
+
+def set_reduce_motion(on: bool) -> None:
+    _store().setValue("ui/reduce_motion", bool(on))
+
+
+def auto_ocr_enabled() -> bool:
+    """Açılan belgelerde metni (taranmışsa OCR ile) arka planda hazırla: Metin Seç aracı anında çalışır."""
+    return _bool("ocr/auto", True)
+
+
+def set_auto_ocr_enabled(on: bool) -> None:
+    _store().setValue("ocr/auto", bool(on))
+
+
+def autosave_overwrite() -> bool:
+    """Açıksa değişen PDF'ler belirli aralıkla özgün dosyanın ÜZERİNE yazılır (varsayılan kapalı)."""
+    return _bool("autosave/overwrite", False)
+
+
+def set_autosave_overwrite(on: bool) -> None:
+    _store().setValue("autosave/overwrite", bool(on))
+
+
 def recovery_enabled() -> bool:
     return _bool("recovery/enabled", True)
 

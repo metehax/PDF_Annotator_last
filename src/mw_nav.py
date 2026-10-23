@@ -136,6 +136,7 @@ class NavMixin:
                 self.thumb_list.scrollToItem(item)
         self.refresh_layers_panel()
         self._update_search_highlight_for_page()
+        self.auto_ocr_kick()
         if self.state.tool == "edit":
             self._scan_current_page_for_edit()
 

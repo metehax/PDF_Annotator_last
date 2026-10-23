@@ -40,9 +40,10 @@ from ui.stamps import StampLibrary
 from ui.toast import ToastManager
 from ui.welcome import RecentMenuRow, WelcomeScreen
 from ui.ocrdialog import _OcrTask
+from mw_textcopy import TextCopyMixin
 
 from mw_common import (
-    APP_ID, CANVAS_TOP_INSET, OPEN_FILTER, PALETTE_RECENT_MAX, RECENT_MAX, TOOLS, TOOL_KEYS, _OpenCancelled, short_tab_name,
+    APP_ID, CANVAS_TOP_INSET, OPEN_FILTER, PALETTE_KEYWORDS, PALETTE_RECENT_MAX, RECENT_MAX, TOOLS, TOOL_KEYS, _OpenCancelled, short_tab_name,
 )
 from mw_annot import AnnotMixin
 from mw_build import BuildMixin
@@ -65,7 +66,7 @@ from mw_workspace import WorkspaceMixin
 # ---------------------------------------------------------------------------
 class MainWindow(
     BuildMixin, ExportMixin, NotesMixin, AnnotMixin, NavMixin, PagesMixin, DocToolsMixin, SignMixin, FormsMixin,
-    OcrMixin, CompareMixin, WorkspaceMixin, ShareMixin, UpdateMixin, QMainWindow,
+    OcrMixin, TextCopyMixin, CompareMixin, WorkspaceMixin, ShareMixin, UpdateMixin, QMainWindow,
 ):
     def __init__(self):
         super().__init__()
@@ -479,6 +480,11 @@ class MainWindow(
             if os.path.exists(p):
                 cmds.append(Command(f"Aç: {os.path.basename(p)}", lambda p=p: self.open_paths([p]),
                                     "Son açılanlar", "file" if p.lower().endswith(".pdf") else "image"))
+        cmds.extend(self._palette_option_commands(s))
+        for c in cmds:
+            if not c.keywords:
+                low = c.title.lower()
+                c.keywords = " ".join(kw for key, kw in PALETTE_KEYWORDS if key in low)
         for title, cat in SEARCH_ENTRIES:
             cmds.append(Command(f"Ayar: {title}", lambda c=cat: self.open_preferences(c), f"Ayarlar › {cat}", "settings"))
         if not q:                                       # boş aramada son kullanılanlar en üstte
@@ -486,6 +492,31 @@ class MainWindow(
             top = [by_title[t] for t in self._palette_recent() if t in by_title]
             cmds = top + [c for c in cmds if c not in top]
         return cmds
+
+    def _palette_option_commands(self, s):
+        """Araç çubuğundaki ayar kutuları: palette de açılıp kapatılabilsin."""
+        cmds = []
+
+        def onoff(title, getter, setter, cat, icon_name, kw=""):
+            cmds.append(Command(f"{title} ({'açık' if getter() else 'kapalı'})",
+                                lambda: setter(not getter()), cat, icon_name, keywords=kw))
+
+        onoff("Otomatik OCR", workspace.auto_ocr_enabled,
+              lambda v: (workspace.set_auto_ocr_enabled(v), self.chk_auto_ocr.setChecked(v)),
+              "Ayarlar", "settings", "ocr taranmış metin tanıma otomatik")
+        onoff("Animasyonları azalt", workspace.reduce_motion,
+              lambda v: (workspace.set_reduce_motion(v), self.chk_motion_sync(v)),
+              "Ayarlar", "settings", "hareket yardım önizleme animasyon")
+        if s:
+            onoff("Sansür/bulanıklaştırmayı tüm sayfalarda aynı yere uygula", lambda: self.state.repeat_pages,
+                  lambda v: setattr(self.state, "repeat_pages", v), "İşaretleme", "redact",
+                  "şablon aynı konum tüm sayfalar sansür gizle bulanık")
+        return cmds
+
+    def chk_motion_sync(self, v):
+        box = getattr(getattr(self, "_prefs", None), "chk_motion", None)
+        if box is not None:
+            box.setChecked(v)
 
     def _palette_recent(self):
         v = self.settings.value("palette/recent", [])
@@ -910,6 +941,7 @@ class MainWindow(
         self.refresh_doc_tabs()
         self._refresh_number_label()
         self.refresh_doc_tabs()
+        self.auto_ocr_kick()
         if hasattr(self, "pane_left"):
             self.pane_left.refresh_sessions()
             self.pane_right.refresh_sessions()
@@ -999,6 +1031,29 @@ class MainWindow(
     # Kapatma
     # =====================================================================
     def closeEvent(self, event):
+        dirty = [s for s in self.sessions if self._is_dirty(s)]
+        if len(dirty) > 1:
+            box = QMessageBox(self)
+            box.setIcon(QMessageBox.Icon.Warning)
+            box.setWindowTitle("Kaydedilmemiş değişiklikler")
+            box.setText(f"<b>{len(dirty)} belgede</b> kaydedilmemiş değişiklik var.")
+            b_all = box.addButton("Tümünü kaydet…", QMessageBox.ButtonRole.AcceptRole)
+            b_no = box.addButton("Kaydetmeden kapat", QMessageBox.ButtonRole.DestructiveRole)
+            box.addButton("İptal", QMessageBox.ButtonRole.RejectRole)
+            box.setDefaultButton(b_all)
+            box.exec()
+            c = box.clickedButton()
+            if c is b_all:
+                if not self.save_all():
+                    event.ignore()
+                    return
+            elif c is b_no:
+                for s in dirty:
+                    s.dirty = False
+                    s.undo_stack.setClean()
+            else:
+                event.ignore()
+                return
         for s in list(self.sessions):
             if not self._confirm_discard(s):
                 event.ignore()

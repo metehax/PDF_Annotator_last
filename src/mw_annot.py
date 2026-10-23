@@ -38,8 +38,66 @@ class AnnotMixin:
             return
         cmd = AddAnnotationCommand(s, s.current_page, ann, on_change=self._on_session_change,
                                     label="İşaret Ekle")
+        if self.state.repeat_pages and isinstance(ann, (RedactionAnnotation, BlurAnnotation)) \
+                and s.pdf.page_count > 1:
+            s.undo_stack.beginMacro("İşaret Ekle (tüm sayfalar)")
+            s.undo_stack.push(cmd)
+            n = self._replicate_annotation(s, s.current_page, ann,
+                                           [p for p in range(s.pdf.page_count) if p != s.current_page])
+            s.undo_stack.endMacro()
+            self.status.setText(f"İşaret {n + 1} sayfaya eklendi.")
+            return
         s.undo_stack.push(cmd)
         self.status.setText("İşaret eklendi.")
+
+    def _replicate_annotation(self, s, page, ann, targets) -> int:
+        """ann'ın kopyasını hedef sayfalarda aynı (sayfa boyutuna oranlı) konuma ekler.
+        Çağıran makro açmalıdır. Eklenen kopya sayısını döndürür."""
+        pw, ph = s.pdf.page_size(page)
+        n = 0
+        for p in targets:
+            if p == page or not (0 <= p < s.pdf.page_count):
+                continue
+            c = Annotation.from_dict(ann.to_dict())
+            w2, h2 = s.pdf.page_size(p)
+            r = c.get_rect()
+            if r is not None and (abs(w2 - pw) > 1 or abs(h2 - ph) > 1):
+                kx, ky = w2 / pw, h2 / ph
+                c.set_rect(QRectF(r.x() * kx, r.y() * ky, r.width() * kx, r.height() * ky))
+            s.undo_stack.push(AddAnnotationCommand(s, p, c, on_change=self._on_session_change,
+                                                   label="İşaret Ekle"))
+            n += 1
+        return n
+
+    def ask_page_scope(self, s):
+        """Hedef sayfa listesi ya da None. Testte sahtelenir."""
+        from ui.savedlg import PageScopeDialog
+        dlg = PageScopeDialog(s.pdf.page_count, s.current_page, self)
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        return dlg.pages()
+
+    def apply_selected_to_pages(self):
+        s = self.active_session
+        if not s:
+            return
+        sel = [(g, self.view.item_ann_map.get(g)) for g in self.view.scene_obj.selectedItems()
+               if g is not self.view.gizmo and g in self.view.item_ann_map]
+        if not sel:
+            self.toasts.show("Önce Seç aracıyla bir işaret seçin.", "info")
+            return
+        if s.pdf.page_count < 2:
+            self.toasts.show("Belgede tek sayfa var.", "info")
+            return
+        targets = self.ask_page_scope(s)
+        if not targets:
+            return
+        s.undo_stack.beginMacro("Diğer sayfalara uygula")
+        total = 0
+        for g, ann in sel:
+            total += self._replicate_annotation(s, self.view.page_of_item(g), ann, targets)
+        s.undo_stack.endMacro()
+        self.toasts.show(f"{total} işaret eklendi ({len(targets)} sayfa). Ctrl+Z hepsini geri alır.", "success")
 
     def on_text_requested(self, rect: QRectF):
         dlg = TextDialog(self.state.font_family, self.state.font_size,

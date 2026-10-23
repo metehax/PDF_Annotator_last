@@ -119,6 +119,7 @@ class PDFView(QGraphicsView):
     numberRequested = Signal(QPointF)
     editTextRequested = Signal(QPointF)             # 'Metin Düzenle' aracıyla tıklandı
     cropRequested = Signal(QRectF)
+    textRectRequested = Signal(QRectF)               # Metin Seç aracı: sürüklenen alan
     imagePlaceRequested = Signal(QRectF)            # resim aracıyla çizilen kutu
     itemsMoved = Signal()
     resizeRequested = Signal(object, QRectF, QRectF)  # ann, eski_rect, yeni_rect
@@ -830,7 +831,7 @@ class PDFView(QGraphicsView):
             item.setPen(QPen(QColor("#3a86ff"), 1.5, Qt.PenStyle.DashLine))
             self._add_temp(item)
 
-        elif tool == "crop":
+        elif tool in ("crop", "copytext"):
             item = QGraphicsRectItem()
             fc = QColor("#3a86ff"); fc.setAlphaF(0.12)
             item.setBrush(QBrush(fc))
@@ -945,7 +946,7 @@ class PDFView(QGraphicsView):
                 path.moveTo(end); path.lineTo(*w2)
             self._temp_item.setPath(path)
 
-        elif tool in ("rect", "oval", "redact", "blur", "crop", "image", "form"):
+        elif tool in ("rect", "oval", "redact", "blur", "crop", "copytext", "image", "form"):
             self._temp_item.setRect(QRectF(self._start, pt).normalized())
 
         elif tool == "highlight":
@@ -997,6 +998,14 @@ class PDFView(QGraphicsView):
             rect = QRectF(self._start, pt).normalized()
             if rect.width() > 4 and rect.height() > 4:
                 ann = BlurAnnotation(rect, self.state.blur_strength, self.state.blur_mode)
+        elif tool == "copytext":
+            rect = QRectF(self._start, pt).normalized()
+            self._clear_temp()
+            if rect.width() > 2 and rect.height() > 2:
+                self.textRectRequested.emit(rect)
+            self._ink_points = []
+            self._hl_fixed_y = None
+            return
         elif tool == "crop":
             rect = QRectF(self._start, pt).normalized()
             self._clear_temp()

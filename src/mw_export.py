@@ -12,7 +12,7 @@ import os
 
 import pymupdf as fitz
 
-from PySide6.QtWidgets import QCheckBox, QDialog, QFileDialog, QInputDialog, QMessageBox
+from PySide6.QtWidgets import QApplication, QCheckBox, QDialog, QFileDialog, QInputDialog, QMessageBox
 
 from models import RedactionAnnotation
 
@@ -29,12 +29,154 @@ class ExportMixin:
     # Dosya: kaydet / dışa aktar / birleştir / ayır / proje
     # =====================================================================
     def save_document(self):
-        """Ctrl+S: resim açıldıysa resim olarak, PDF açıldıysa PDF olarak kaydet."""
+        """Ctrl+S: PDF bulunduğu dosyanın üzerine yazılır; resim açıldıysa resim olarak kaydedilir."""
         s = self.active_session
-        if s and s.pdf.is_image:
+        if s:
+            self.save_in_place(s)
+
+    @staticmethod
+    def _file_signed(path) -> bool:
+        try:
+            with open(path, "rb") as f:
+                return b"/ByteRange" in f.read()
+        except OSError:
+            return False
+
+    def save_in_place(self, s, auto=False) -> bool:
+        """Belgeyi bulunduğu dosyanın üzerine yazar (işaretler ve geri alma geçmişi bellekte kalır)."""
+        if s.pdf.is_image:
+            if auto:
+                return False
+            if s is not self.active_session:
+                self.switch_session(self.sessions.index(s))
             self.save_as_image()
+            return not self._is_dirty(s)
+        if not auto and not self._confirm_redactions(s, overwrite=True):
+            return False
+        if self._file_signed(s.path):
+            if auto:
+                return False
+            r = QMessageBox.question(
+                self, "Dijital imzalı dosya",
+                f"'{s.title}' dijital imzalı. Üzerine yazmak mevcut imzaları GEÇERSİZ kılar.\n\n"
+                "Yine de üzerine yazılsın mı? (Hayır: Farklı kaydet)",
+                QMessageBox.StandardButton.Yes | QMessageBox.StandardButton.No | QMessageBox.StandardButton.Cancel)
+            if r != QMessageBox.StandardButton.Yes:
+                if r == QMessageBox.StandardButton.No:
+                    self.save_pdf_as()
+                return not self._is_dirty(s)
+        tmp = s.path + ".kaydediliyor"
+        try:
+            s.pdf.export_pdf(tmp, s.annotations, self.font_ctx, security=getattr(s, "security", None))
+            os.replace(tmp, s.path)
+        except Exception as ex:
+            try:
+                os.remove(tmp)
+            except OSError:
+                pass
+            if auto:
+                self.status.setText(f"Otomatik kayıt başarısız: {ex}")
+            else:
+                QMessageBox.critical(self, "Hata", f"Kaydedilemedi (dosya başka yerde açık olabilir; "
+                                                   f"'Farklı kaydet' deneyin):\n{ex}")
+            return False
+        self._mark_saved(s)
+        self._drop_draft(s)
+        if auto:
+            self.status.setText(f"Otomatik kaydedildi: {s.title}")
         else:
-            self.save_pdf()
+            self.toasts.show(f"Kaydedildi: {s.title}", "success")
+        return True
+
+    def set_autosave(self, on: bool):
+        workspace.set_autosave_overwrite(bool(on))
+        if on:
+            self._autosave_timer.start()
+            self.toasts.show("Otomatik kaydetme açık: değişiklikler her 30 sn'de özgün dosyaya yazılır. "
+                             "Sansür/bulanıklaştırma dosyaya kalıcı işlenir.", "info", timeout_ms=7000)
+        else:
+            self._autosave_timer.stop()
+
+    def _autosave_tick(self):
+        if QApplication.activeModalWidget() or QApplication.activePopupWidget():
+            return
+        for s in list(self.sessions):
+            if self._is_dirty(s) and not s.pdf.is_image:
+                self.save_in_place(s, auto=True)
+
+    def ask_save_all(self, dirty):
+        """(mod, oturumlar, klasör) ya da None. Testte sahtelenir."""
+        from ui.savedlg import SaveAllDialog
+        dlg = SaveAllDialog(dirty, self, str(self.settings.value("saveAllDir", "") or ""))
+        if dlg.exec() != QDialog.DialogCode.Accepted:
+            return None
+        if dlg.mode == "dir":
+            self.settings.setValue("saveAllDir", dlg.target_dir())
+        return dlg.mode, dlg.chosen(), dlg.target_dir()
+
+    def save_all(self) -> bool:
+        """Kaydedilmemiş tüm sekmeleri kaydeder (üzerine yaz / kopya / klasöre); hepsi kaydedildiyse True."""
+        dirty = [s for s in self.sessions if self._is_dirty(s)]
+        if not dirty:
+            self.toasts.show("Kaydedilmemiş belge yok.", "info")
+            return True
+        res = self.ask_save_all(dirty)
+        if not res:
+            return False
+        mode, chosen, folder = res
+        done, skipped = 0, []
+        for s in chosen:
+            if s.pdf.is_image:
+                skipped.append(s.title)
+                continue
+            if mode == "over":
+                if self.save_in_place(s):
+                    done += 1
+                continue
+            base = os.path.splitext(s.title)[0]
+            out_dir = folder if mode == "dir" else os.path.dirname(s.path)
+            out = os.path.join(out_dir, base + "_isaretli.pdf")
+            k = 2
+            while os.path.exists(out):
+                out = os.path.join(out_dir, f"{base}_isaretli{k}.pdf")
+                k += 1
+            try:
+                s.pdf.export_pdf(out, s.annotations, self.font_ctx, security=getattr(s, "security", None))
+                self._mark_saved(s)
+                done += 1
+            except Exception as ex:
+                QMessageBox.critical(self, "Hata", f"{s.title} kaydedilemedi:\n{ex}")
+        msg = f"{done} belge kaydedildi."
+        if skipped:
+            msg += f" Resim sekmeleri atlandı (ayrı kaydedin): {', '.join(skipped)}"
+        self.toasts.show(msg, "success")
+        return not any(self._is_dirty(s) for s in chosen if not s.pdf.is_image)
+
+    def save_pdf_as(self):
+        """Farklı kaydet: yeni dosyaya yazar ve belge artık o dosya olur (sekme adı/yolu değişir)."""
+        s = self.active_session
+        if not s:
+            return
+        if not self._confirm_redactions(s):
+            return
+        default = os.path.splitext(s.path)[0] + ("_kopya.pdf" if not s.pdf.is_image else ".pdf")
+        path, _ = QFileDialog.getSaveFileName(self, "Farklı Kaydet", default, "PDF (*.pdf)")
+        if not path:
+            return
+        if not path.lower().endswith(".pdf"):
+            path += ".pdf"
+        try:
+            s.pdf.export_pdf(path, s.annotations, self.font_ctx, security=getattr(s, "security", None))
+        except Exception as ex:
+            QMessageBox.critical(self, "Hata", f"Kaydedilemedi:\n{ex}")
+            return
+        self._mark_saved(s)
+        self._drop_draft(s)
+        s.path = path
+        s.title = os.path.basename(path)
+        s.pdf.path = path
+        self.refresh_doc_tabs()
+        self._toast_saved("Kaydedildi", path)
 
     def save_as_image(self):
         s = self.active_session
@@ -73,8 +215,11 @@ class ExportMixin:
         box = QMessageBox(self)
         box.setIcon(QMessageBox.Icon.Warning)
         box.setWindowTitle("Sansür uygulanacak")
-        box.setText(f"<b>{n} sansür kutusu ({pages} sayfada)</b> kopyaya uygulanacak.")
-        box.setInformativeText("Altındaki metin ve resim kopyadan KALICI olarak silinir (özgün dosya değişmez). "
+        over = getattr(self, "_redact_overwrite", False)
+        box.setText(f"<b>{n} sansür kutusu ({pages} sayfada)</b> " +
+                    ("dosyaya uygulanacak." if over else "kopyaya uygulanacak."))
+        box.setInformativeText(("Altındaki metin ve resim ÖZGÜN DOSYADAN KALICI olarak silinir. " if over else
+                                "Altındaki metin ve resim kopyadan KALICI olarak silinir (özgün dosya değişmez). ") +
                                "Ekranda yarı saydam görünen kutular çıktıda tam dolgu olur.")
         again = QCheckBox("Bir daha sorma")
         box.setCheckBox(again)
@@ -90,12 +235,13 @@ class ExportMixin:
             return "save"
         return "final" if c is b_final else "cancel"
 
-    def _confirm_redactions(self, s) -> bool:
+    def _confirm_redactions(self, s, overwrite=False) -> bool:
         """Kaydetmeden önce sansür özeti: kaç kutu, kaç sayfa; "Nihai görünüme bak" ekranı çıktıdaki gibi gösterir."""
         boxes = [(p, a) for p, lst in s.annotations.items() for a in lst
                  if isinstance(a, RedactionAnnotation) and not a.quiet]
         if not boxes or str(self.settings.value("redactConfirmOff", "false")).lower() == "true":
             return True
+        self._redact_overwrite = overwrite
         choice = self._ask_redaction_summary(len(boxes), len({p for p, _ in boxes}))
         if choice == "final":
             self.set_redact_final_view(True)

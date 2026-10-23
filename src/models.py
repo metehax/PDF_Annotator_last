@@ -1018,6 +1018,7 @@ class ToolState:
         self.watermark = WatermarkConfig()
         self.form_kind = "text"          # Form Alanı aracı: forms.FIELD_KINDS anahtarı
         self.form_ask = True             # oluştururken özellik penceresini aç
+        self.repeat_pages = False        # Gizle/Bulanıklaştır: aynı konumu tüm sayfalara uygula
 
 
 # ---------------------------------------------------------------------------

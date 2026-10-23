@@ -515,3 +515,25 @@ Beklenmeyen hatalar uygulamayı kapatmaz; `Belgeler\PDF Annotator\Gunlukler\pdfa
 
 ## Otomatik güncelleme (K3)
 Yardım → **Güncellemeleri denetle…** ve Tercihler → *Güncelleme* ("Açılışta denetle" varsayılan açık, "Sürüm notları"). Yeni sürümde notlar ve boyutla birlikte "İndir ve kur" sorulur; kurucu SHA-256 ile doğrulanır, yalnız HTTPS kabul edilir, ağ hataları açılışta sessizdir. `appinfo.UPDATE_URL` boşsa özellik kapalıdır. Yayın adımları: `YAYIN.md` (`tools\make_release.py` → GitHub Release).
+
+## Kaydetme, şablonlu sayfalar ve metin kopyalama
+* **Kaydet (Ctrl+S)** açık PDF'in üzerine yazar; **Farklı kaydet (Ctrl+Shift+S)** belgeyi yeni dosyaya taşır;
+  **Dışa aktar › Kopya olarak kaydet** özgün dosyayı korur. **Tümünü kaydet (Ctrl+Alt+S)** her seferinde
+  üzerine yaz / kopya / tek klasör seçtirir (kapanışta da önerilir). **Otomatik kaydet** (Dosya menüsü, kapalı gelir)
+  değişen PDF'leri 30 sn'de bir özgün dosyaya yazar; dijital imzalı dosyalara dokunmaz.
+* **Aynı şablonlu sayfalar:** Gizle/Bulanıklaştır araçlarında "Tüm sayfalarda aynı yere uygula" ya da bir işareti
+  seçip Düzenle › "Seçili işareti diğer sayfalara uygula…" (tümü/tek/çift/aralık). Tek Ctrl+Z hepsini geri alır.
+* **Metin Seç (K):** alan sürükleyin, metin panoya gider. Taranmış PDF/resimlerde metin **otomatik OCR** ile
+  arka planda hazırlanır (kapatmak için araç çubuğundaki kutu). Tüm sayfa: Ctrl+Shift+C. OCR için `resources/tessdata`
+  içinde `tur`/`eng` `.traineddata` dosyaları gerekir.
+
+## Animasyonlu araç yardımı
+Özellik çubuğundaki **ⓘ** düğmesinin üzerine gelince (ya da tıklayınca) aracın nasıl kullanılacağını gösteren kısa bir
+animasyon açılır. Hafiftir (yalnızca açıkken çalışır). Tercihler › Görünüm › "Animasyonları azalt" ile durağan hale getirilir.
+
+## OCR dil dosyaları (önemli)
+`resources/tessdata/*.traineddata` Git'e girmez (`.gitignore`); her biri ~4-5 MB'dır. Ancak `packaging/pdfannotator.spec`
+bu klasörü kurulum paketine koyar, bu yüzden **kurulum/güncelleme alan kullanıcılar ayrıca bir şey kurmaz**.
+`build.bat`, `tur.traineddata` ve `eng.traineddata` yoksa derlemeyi durdurur. Projeyi başka bir bilgisayara
+indirdiyseniz derlemeden önce `kur.bat`'ı çalıştırın ya da iki dosyayı elle `resources/tessdata` içine koyun.
+Otomatik OCR ve Metin Seç (K) bu dosyalara dayanır.
